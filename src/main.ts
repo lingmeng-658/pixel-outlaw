@@ -241,12 +241,21 @@ class MainScene extends Phaser.Scene {
     if (dx === 0 && dy === 0) return
 
     const length = Math.hypot(dx, dy)
-    const vx = (dx / length) * bulletSpeed
-    const vy = (dy / length) * bulletSpeed
+    const normalizedDx = dx / length
+    const normalizedDy = dy / length
+
+    const vx = normalizedDx * bulletSpeed
+    const vy = normalizedDy * bulletSpeed
 
     this.lastShotTime = time
 
-    const bullet = this.physics.add.image(this.player.x, this.player.y, 'bullet')
+    const spawnOffset = 22
+    const bullet = this.physics.add.image(
+      this.player.x + normalizedDx * spawnOffset,
+      this.player.y + normalizedDy * spawnOffset,
+      'bullet',
+    )
+
     bullet.setData('vx', vx)
     bullet.setData('vy', vy)
     this.bullets.add(bullet)
