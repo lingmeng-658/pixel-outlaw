@@ -288,26 +288,32 @@ class MainScene extends Phaser.Scene {
     })
   }
 
-  private addScore(points: number, x: number, y: number) {
-    this.score += points
+  private addScore(basePoints: number, x: number, y: number) {
+    const isCritical = Math.random() < 0.05  //概率暴击
+    const finalPoints = isCritical ? 15 : basePoints
+
+    this.score += finalPoints
     this.scoreText.setText(`Score: ${this.score}`)
-    this.showScorePopup(x, y, points)
+    this.showScorePopup(x, y, finalPoints, isCritical)
   }
 
-  private showScorePopup(x: number, y: number, points: number) {
-    const popup = this.add.text(x, y, `+${points}`, {
+  private showScorePopup(x: number, y: number, points: number, isCritical: boolean) {
+    const popup = this.add.text(x, y, isCritical ? `+${points}!` : `+${points}`, {
       fontFamily: 'monospace',
-      fontSize: '18px',
-      color: '#ffe6a7',
+      fontSize: isCritical ? '24px' : '18px',
+      color: isCritical ? '#ff5a3d' : '#ffe6a7',
       stroke: '#2b1d16',
-      strokeThickness: 3,
+      strokeThickness: isCritical ? 5 : 3,
     }).setOrigin(0.5)
+
+    popup.setScale(isCritical ? 1.2 : 1)
 
     this.tweens.add({
       targets: popup,
-      y: y - 28,
+      y: y - (isCritical ? 42 : 28),
       alpha: 0,
-      duration: 500,
+      scale: isCritical ? 1.55 : 1.1,
+      duration: isCritical ? 650 : 500,
       ease: 'Quad.easeOut',
       onComplete: () => {
         popup.destroy()
