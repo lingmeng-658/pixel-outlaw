@@ -146,7 +146,9 @@ class MainScene extends Phaser.Scene {
 
       const item = itemObject as Phaser.Physics.Arcade.Sprite
       const itemType = item.getData('type') as string
+      const glow = item.getData('glow') as Phaser.GameObjects.Image | undefined
 
+      glow?.destroy()
       item.destroy()
 
       if (itemType === 'coffee') {
@@ -232,17 +234,47 @@ class MainScene extends Phaser.Scene {
     const elapsed = time - this.levelStartTime
 
     if (elapsed >= 9000) {
-      this.spawnCoffee()
+      this.spawnCoffee(true)
       this.coffeeSpawned = true
     }
   }
 
-  private spawnCoffee() {
-    const coffee = this.physics.add.sprite(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 90, 'coffee')
+  private spawnCoffee(showLabel = true) {
+    const x = GAME_WIDTH / 2
+    const y = GAME_HEIGHT / 2 + 90
+
+    const glow = this.add.image(x, y, 'itemGlow')
+    glow.setAlpha(0.65)
+    glow.setDepth(1)
+
+    const coffee = this.physics.add.sprite(x, y, 'coffee')
     coffee.setData('type', 'coffee')
+    coffee.setData('glow', glow)
+    coffee.setDepth(2)
     this.items.add(coffee)
 
-    this.showFloatingText(coffee.x, coffee.y - 24, 'COFFEE')
+    this.tweens.add({
+      targets: [coffee, glow],
+      y: y - 6,
+      duration: 700,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    })
+
+    this.tweens.add({
+      targets: glow,
+      scale: 1.18,
+      alpha: 0.32,
+      duration: 900,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    })
+
+    if (showLabel) {
+      this.showFloatingText(coffee.x, coffee.y - 30, 'COFFEE')
+    }
   }
 
   private activateSpeedBoost(time: number) {
@@ -498,16 +530,33 @@ class MainScene extends Phaser.Scene {
     g.generateTexture('bullet', 10, 10)
     g.clear()
 
-    g.fillStyle(0x8b5a2b)
-    g.fillRect(5, 8, 18, 16)
-    g.fillStyle(0xf5c16c)
-    g.fillRect(7, 6, 14, 4)
-    g.fillStyle(0xffffff)
-    g.fillRect(20, 11, 5, 7)
-    g.fillStyle(0x3a2414)
-    g.fillRect(8, 11, 12, 8)
-    g.generateTexture('coffee', 28, 28)
+    g.fillStyle(0xfff0a3, 0.28)
+    g.fillCircle(18, 18, 16)
+    g.lineStyle(2, 0xffd166, 0.85)
+    g.strokeCircle(18, 18, 13)
+    g.generateTexture('itemGlow', 36, 36)
+    g.clear()
 
+    g.fillStyle(0xffd166)
+    g.fillRect(4, 7, 20, 18)
+
+    g.fillStyle(0x8b5a2b)
+    g.fillRect(6, 9, 16, 14)
+
+    g.fillStyle(0xf5c16c)
+    g.fillRect(8, 6, 12, 4)
+
+    g.fillStyle(0xffffff)
+    g.fillRect(21, 11, 5, 7)
+
+    g.fillStyle(0x3a2414)
+    g.fillRect(9, 12, 10, 7)
+
+    g.fillStyle(0xfff0a3)
+    g.fillRect(10, 4, 3, 2)
+    g.fillRect(15, 4, 3, 2)
+
+    g.generateTexture('coffee', 30, 30)
     g.destroy()
   }
 }
