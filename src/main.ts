@@ -229,15 +229,20 @@ class MainScene extends Phaser.Scene {
 
     if (time - this.lastShotTime < shootCooldown) return
 
-    let vx = 0
-    let vy = 0
     const bulletSpeed = 460
+    let dx = 0
+    let dy = 0
 
-    if (this.keys.LEFT.isDown) vx = -bulletSpeed
-    else if (this.keys.RIGHT.isDown) vx = bulletSpeed
-    else if (this.keys.UP.isDown) vy = -bulletSpeed
-    else if (this.keys.DOWN.isDown) vy = bulletSpeed
-    else return
+    if (this.keys.LEFT.isDown) dx -= 1
+    if (this.keys.RIGHT.isDown) dx += 1
+    if (this.keys.UP.isDown) dy -= 1
+    if (this.keys.DOWN.isDown) dy += 1
+
+    if (dx === 0 && dy === 0) return
+
+    const length = Math.hypot(dx, dy)
+    const vx = (dx / length) * bulletSpeed
+    const vy = (dy / length) * bulletSpeed
 
     this.lastShotTime = time
 
