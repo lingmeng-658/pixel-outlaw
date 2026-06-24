@@ -8,6 +8,7 @@ class MainScene extends Phaser.Scene {
   private player!: Phaser.Physics.Arcade.Sprite
   private bullets!: Phaser.Physics.Arcade.Group
   private enemies!: Phaser.Physics.Arcade.Group
+  private items!: Phaser.Physics.Arcade.Group
 
   private keys!: Record<string, Phaser.Input.Keyboard.Key>
 
@@ -26,6 +27,14 @@ class MainScene extends Phaser.Scene {
   private lastShotTime = 0
   private lastSpawnTime = 0
   private lastDamageTime = 0
+
+  private normalPlayerSpeed = 220
+  private boostedPlayerSpeed = 315
+  private playerSpeed = 220
+  private speedBoostUntil = 0
+
+  private levelStartTime = 0
+  private coffeeSpawned = false
 
   constructor() {
     super('MainScene')
@@ -50,6 +59,7 @@ class MainScene extends Phaser.Scene {
 
     this.bullets = this.physics.add.group()
     this.enemies = this.physics.add.group()
+    this.items = this.physics.add.group()
 
     this.scoreText = this.add.text(24, 20, 'Score: 0', {
       fontFamily: 'monospace',
@@ -130,6 +140,19 @@ class MainScene extends Phaser.Scene {
         this.endGame()
       }
     })
+
+    this.physics.add.overlap(this.player, this.items, (_playerObject, itemObject) => {
+      if (!this.isStarted || this.isGameOver) return
+
+      const item = itemObject as Phaser.Physics.Arcade.Sprite
+      const itemType = item.getData('type') as string
+
+      item.destroy()
+
+      if (itemType === 'coffee') {
+        this.activateSpeedBoost(this.time.now)
+      }
+    })
   }
 
   update(time: number, delta: number) {
@@ -143,6 +166,8 @@ class MainScene extends Phaser.Scene {
       return
     }
 
+    this.updateLevelOne(time)
+    this.updateSpeedBoost(time)
     this.handlePlayerMove()
     this.handleShooting(time)
     this.moveBullets(delta)
@@ -161,6 +186,11 @@ class MainScene extends Phaser.Scene {
     this.lastShotTime = 0
     this.lastSpawnTime = 0
     this.lastDamageTime = 0
+    
+    this.playerSpeed = this.normalPlayerSpeed
+    this.speedBoostUntil = 0
+    this.levelStartTime = 0
+    this.coffeeSpawned = false
   }
 
   private handleStartInput() {
@@ -179,6 +209,7 @@ class MainScene extends Phaser.Scene {
     if (this.isStarted) return
 
     this.isStarted = true
+    this.levelStartTime = this.time.now
     this.player.setVisible(true)
     this.titleText.setVisible(false)
     this.startText.setVisible(false)
@@ -195,8 +226,64 @@ class MainScene extends Phaser.Scene {
     this.gameOverText.setText(`GAME OVER\nScore: ${this.score}\nPress R to restart`)
   }
 
+    private updateLevelOne(time: number) {
+    if (this.levelStartTime === 0 || this.coffeeSpawned) return
+
+    const elapsed = time - this.levelStartTime
+
+    if (elapsed >= 9000) {
+      this.spawnCoffee()
+      this.coffeeSpawned = true
+    }
+  }
+
+  private spawnCoffee() {
+    const coffee = this.physics.add.sprite(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 90, 'coffee')
+    coffee.setData('type', 'coffee')
+    this.items.add(coffee)
+
+    this.showFloatingText(coffee.x, coffee.y - 24, 'COFFEE')
+  }
+
+  private activateSpeedBoost(time: number) {
+    this.playerSpeed = this.boostedPlayerSpeed
+    this.speedBoostUntil = time + 4500
+
+    this.showFloatingText(this.player.x, this.player.y - 34, 'SPEED UP')
+  }
+
+  private updateSpeedBoost(time: number) {
+    if (this.speedBoostUntil === 0) return
+
+    if (time >= this.speedBoostUntil) {
+      this.playerSpeed = this.normalPlayerSpeed
+      this.speedBoostUntil = 0
+    }
+  }
+
+  private showFloatingText(x: number, y: number, text: string) {
+    const popup = this.add.text(x, y, text, {
+      fontFamily: 'monospace',
+      fontSize: '16px',
+      color: '#b8f28b',
+      stroke: '#1e1611',
+      strokeThickness: 3,
+    }).setOrigin(0.5)
+
+    this.tweens.add({
+      targets: popup,
+      y: y - 24,
+      alpha: 0,
+      duration: 700,
+      ease: 'Quad.easeOut',
+      onComplete: () => {
+        popup.destroy()
+      },
+    })
+  }
+
   private handlePlayerMove() {
-    const speed = 220
+    const speed = this.playerSpeed
     let vx = 0
     let vy = 0
 
@@ -346,7 +433,11 @@ class MainScene extends Phaser.Scene {
     }
 
     const enemy = this.physics.add.sprite(x, y, 'enemy')
-    enemy.setData('speed', Phaser.Math.Between(70, 105))
+
+    const elapsed = this.levelStartTime > 0 ? time - this.levelStartTime : 0
+    const preCoffeePressure = !this.coffeeSpawned && elapsed >= 5000 ? 12 : 0
+
+    enemy.setData('speed', Phaser.Math.Between(70, 105) + preCoffeePressure)
     this.enemies.add(enemy)
   }
 
@@ -405,6 +496,18 @@ class MainScene extends Phaser.Scene {
     g.fillStyle(0xffe066)
     g.fillCircle(5, 5, 5)
     g.generateTexture('bullet', 10, 10)
+    g.clear()
+
+    g.fillStyle(0x8b5a2b)
+    g.fillRect(5, 8, 18, 16)
+    g.fillStyle(0xf5c16c)
+    g.fillRect(7, 6, 14, 4)
+    g.fillStyle(0xffffff)
+    g.fillRect(20, 11, 5, 7)
+    g.fillStyle(0x3a2414)
+    g.fillRect(8, 11, 12, 8)
+    g.generateTexture('coffee', 28, 28)
+
     g.destroy()
   }
 }
