@@ -111,18 +111,6 @@ class MainScene extends Phaser.Scene {
       this.startGame()
     })
 
-    this.physics.add.overlap(this.bullets, this.enemies, (bulletObject, enemyObject) => {
-      const bullet = bulletObject as Phaser.Physics.Arcade.Image
-      const enemy = enemyObject as Phaser.Physics.Arcade.Sprite
-
-      bullet.destroy()
-      enemy.destroy()
-
-      this.score += 10
-      this.scoreText.setText(`Score: ${this.score}`)
-      this.cameras.main.shake(60, 0.003)
-    })
-
     this.physics.add.overlap(this.player, this.enemies, (_playerObject, enemyObject) => {
       if (!this.isStarted || this.isGameOver) return
 
@@ -204,7 +192,7 @@ class MainScene extends Phaser.Scene {
     this.enemies.clear(true, true)
     this.bullets.clear(true, true)
 
-    this.gameOverText.setText(`GAME OVER\nScore: ${this.score}\nPress R to restart`)
+    this.gameOhandleShootingverText.setText(`GAME OVER\nScore: ${this.score}\nPress R to restart`)
   }
 
   private handlePlayerMove() {
@@ -288,17 +276,44 @@ class MainScene extends Phaser.Scene {
         const distance = Phaser.Math.Distance.Between(bullet.x, bullet.y, enemy.x, enemy.y)
 
         if (distance < 24) {
+          const enemyX = enemy.x
+          const enemyY = enemy.y
+
           bullet.destroy()
           enemy.destroy()
 
-          this.score += 10
-          this.scoreText.setText(`Score: ${this.score}`)
-          this.cameras.main.shake(60, 0.003)
+          this.addScore(10, enemyX, enemyY)
         }
       })
     })
   }
 
+  private addScore(points: number, x: number, y: number) {
+    this.score += points
+    this.scoreText.setText(`Score: ${this.score}`)
+    this.showScorePopup(x, y, points)
+  }
+
+  private showScorePopup(x: number, y: number, points: number) {
+    const popup = this.add.text(x, y, `+${points}`, {
+      fontFamily: 'monospace',
+      fontSize: '18px',
+      color: '#ffe6a7',
+      stroke: '#2b1d16',
+      strokeThickness: 3,
+    }).setOrigin(0.5)
+
+    this.tweens.add({
+      targets: popup,
+      y: y - 28,
+      alpha: 0,
+      duration: 500,
+      ease: 'Quad.easeOut',
+      onComplete: () => {
+        popup.destroy()
+      },
+    })
+  }
 
   private spawnEnemies(time: number) {
     const spawnCooldown = 900
