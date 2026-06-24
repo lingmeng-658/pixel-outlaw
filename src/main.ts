@@ -192,7 +192,7 @@ class MainScene extends Phaser.Scene {
     this.enemies.clear(true, true)
     this.bullets.clear(true, true)
 
-    this.gameOhandleShootingverText.setText(`GAME OVER\nScore: ${this.score}\nPress R to restart`)
+    this.gameOverText.setText(`GAME OVER\nScore: ${this.score}\nPress R to restart`)
   }
 
   private handlePlayerMove() {
