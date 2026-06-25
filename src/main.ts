@@ -4,6 +4,8 @@ import './style.css'
 const GAME_WIDTH = 800
 const GAME_HEIGHT = 600
 
+type PickupType = 'coffee' | 'heart' | 'shield'
+
 class MainScene extends Phaser.Scene {
   private player!: Phaser.Physics.Arcade.Sprite
   private bullets!: Phaser.Physics.Arcade.Group
@@ -19,6 +21,9 @@ class MainScene extends Phaser.Scene {
 
   private scoreText!: Phaser.GameObjects.Text
   private healthText!: Phaser.GameObjects.Text
+  private heartIcons: Phaser.GameObjects.Image[] = []
+  private shieldIcon!: Phaser.GameObjects.Image
+  private shieldCountText!: Phaser.GameObjects.Text
   private waveText!: Phaser.GameObjects.Text
   private titleText!: Phaser.GameObjects.Text
   private startText!: Phaser.GameObjects.Text
@@ -33,6 +38,7 @@ class MainScene extends Phaser.Scene {
   private boostedPlayerSpeed = 315
   private playerSpeed = 220
   private speedBoostUntil = 0
+  private speedBoostPulse?: Phaser.Tweens.Tween
 
   private levelStartTime = 0
   private coffeeSpawned = false
@@ -42,6 +48,19 @@ class MainScene extends Phaser.Scene {
   private enemiesSpawned = 0
   private enemiesCleared = 0
   private isLevelClear = false
+
+  private maxHealth = 3
+  private hasTakenDamage = false
+  private currentWaveItem: PickupType | null = null
+  private itemSpawnedThisWave = false
+  private heartIntroduced = false
+  private coffeeIntroduced = false
+  private shieldIntroduced = false
+  private finalPressureWaveDone = false
+
+  private shieldCharges = 0
+  private shieldUntil = 0
+  private shieldAura?: Phaser.GameObjects.Image
 
   constructor() {
     super('MainScene')
@@ -74,17 +93,41 @@ class MainScene extends Phaser.Scene {
       color: '#ffe6a7',
     })
 
-    this.healthText = this.add.text(24, 50, 'HP: 3', {
+    this.healthText = this.add.text(24, 50, 'HP', {
       fontFamily: 'monospace',
-      fontSize: '22px',
+      fontSize: '18px',
       color: '#ffb3a7',
+      stroke: '#1e1611',
+      strokeThickness: 3,
     })
+
+    this.heartIcons = []
+    for (let i = 0; i < this.maxHealth; i += 1) {
+      const heart = this.add.image(66 + i * 26, 62, 'hpHeartFull')
+      heart.setOrigin(0.5)
+      this.heartIcons.push(heart)
+    }
+
+    const shieldX = 66 + this.maxHealth * 26 + 14
+    this.shieldIcon = this.add.image(shieldX, 62, 'shieldItem')
+    this.shieldIcon.setScale(0.72)
+    this.shieldIcon.setVisible(false)
+
+    this.shieldCountText = this.add.text(shieldX + 10, 50, '1', {
+      fontFamily: 'monospace',
+      fontSize: '18px',
+      color: '#8cc7ff',
+      stroke: '#1e1611',
+      strokeThickness: 3,
+    }).setVisible(false)
+
+    this.updateHealthDisplay()
 
     this.waveText = this.add.text(GAME_WIDTH - 24, 20, 'Wave: 1', {
       fontFamily: 'monospace',
       fontSize: '22px',
       color: '#ffe6a7',
-    }).setOrigin(1, 0)
+    }).setOrigin(1, 0).setVisible(false)
 
     this.titleText = this.add.text(GAME_WIDTH / 2, 210, 'PIXEL OUTLAW', {
       fontFamily: 'monospace',
@@ -138,13 +181,31 @@ class MainScene extends Phaser.Scene {
       if (!this.isStarted || this.isGameOver) return
 
       const now = this.time.now
+      const enemy = enemyObject as Phaser.Physics.Arcade.Sprite
+
+      if (this.shieldCharges > 0) {
+        const enemyX = enemy.x
+        const enemyY = enemy.y
+
+        this.clearShield()
+
+        enemy.destroy()
+        this.cameras.main.shake(80, 0.004)
+        this.showBlockFlash()
+        this.showFloatingText(enemyX, enemyY - 20, 'BLOCK')
+
+        this.enemiesCleared += 1
+        this.checkWaveProgress()
+        return
+      }
+
       if (now - this.lastDamageTime < 700) return
 
       this.lastDamageTime = now
+      this.hasTakenDamage = true
       this.health -= 1
-      this.healthText.setText(`HP: ${this.health}`)
+      this.updateHealthDisplay()
 
-      const enemy = enemyObject as Phaser.Physics.Arcade.Sprite
       enemy.destroy()
 
       this.cameras.main.shake(120, 0.008)
@@ -170,6 +231,10 @@ class MainScene extends Phaser.Scene {
 
       if (itemType === 'coffee') {
         this.activateSpeedBoost(this.time.now)
+      } else if (itemType === 'heart') {
+        this.activateHeal()
+      } else if (itemType === 'shield') {
+        this.activateShield(this.time.now)
       }
     })
   }
@@ -187,6 +252,7 @@ class MainScene extends Phaser.Scene {
 
     this.updateLevelOne(time)
     this.updateSpeedBoost(time)
+    this.updateShield(time)
     this.handlePlayerMove()
     this.handleShooting(time)
     this.moveBullets(delta)
@@ -208,6 +274,7 @@ class MainScene extends Phaser.Scene {
     
     this.playerSpeed = this.normalPlayerSpeed
     this.speedBoostUntil = 0
+    this.speedBoostPulse = undefined
     this.levelStartTime = 0
     this.coffeeSpawned = false
 
@@ -216,6 +283,18 @@ class MainScene extends Phaser.Scene {
     this.enemiesSpawned = 0
     this.enemiesCleared = 0
     this.isLevelClear = false
+
+    this.hasTakenDamage = false
+    this.currentWaveItem = null
+    this.itemSpawnedThisWave = false
+    this.heartIntroduced = false
+    this.coffeeIntroduced = false
+    this.shieldIntroduced = false
+    this.finalPressureWaveDone = false
+
+    this.shieldCharges = 0
+    this.shieldUntil = 0
+    this.shieldAura = undefined
   }
 
   private handleStartInput() {
@@ -245,6 +324,8 @@ class MainScene extends Phaser.Scene {
   private endGame() {
     this.isGameOver = true
     this.player.setVelocity(0, 0)
+    this.stopSpeedBoostPulse()
+    this.clearShield()
 
     this.enemies.clear(true, true)
     this.bullets.clear(true, true)
@@ -254,19 +335,48 @@ class MainScene extends Phaser.Scene {
   }
 
     private updateLevelOne(time: number) {
-    if (this.levelStartTime === 0 || this.coffeeSpawned || this.isLevelClear) return
+    if (this.levelStartTime === 0 || this.isLevelClear) return
+    if (!this.currentWaveItem || this.itemSpawnedThisWave) return
 
     const elapsed = time - this.levelStartTime
+    const itemSpawnDelay = this.currentWaveItem === 'heart' ? 700 : 1800
 
-    if (elapsed >= 9000) {
-      this.spawnCoffee(true)
-      this.coffeeSpawned = true
+    if (elapsed >= itemSpawnDelay) {
+      this.spawnPickup(this.currentWaveItem, true)
+      this.itemSpawnedThisWave = true
+    }
+  }
+
+
+  private getPickupSpawnPosition(type: PickupType) {
+    if (type === 'heart') {
+      return {
+        x: Phaser.Math.Between(GAME_WIDTH / 2 - 120, GAME_WIDTH / 2 + 120),
+        y: Phaser.Math.Between(GAME_HEIGHT / 2 - 80, GAME_HEIGHT / 2 + 110),
+      }
+    }
+
+    return {
+      x: Phaser.Math.Between(110, GAME_WIDTH - 110),
+      y: Phaser.Math.Between(110, GAME_HEIGHT - 110),
+    }
+  }
+
+  private spawnPickup(type: PickupType, showLabel = true) {
+    if (type === 'coffee') {
+      this.coffeeIntroduced = true
+      this.spawnCoffee(showLabel)
+    } else if (type === 'heart') {
+      this.heartIntroduced = true
+      this.spawnHeart(showLabel)
+    } else if (type === 'shield') {
+      this.shieldIntroduced = true
+      this.spawnShield(showLabel)
     }
   }
 
   private spawnCoffee(showLabel = true) {
-    const x = GAME_WIDTH / 2
-    const y = GAME_HEIGHT / 2 + 90
+    const { x, y } = this.getPickupSpawnPosition('coffee')
 
     const glow = this.add.image(x, y, 'itemGlow')
     glow.setAlpha(0.65)
@@ -302,12 +412,91 @@ class MainScene extends Phaser.Scene {
     }
   }
 
+  private spawnHeart(showLabel = true, fixedRewardPosition = false) {
+    const { x, y } = fixedRewardPosition
+      ? { x: GAME_WIDTH / 2, y: GAME_HEIGHT / 2 + 90 }
+      : this.getPickupSpawnPosition('heart')
+
+    const glow = this.add.image(x, y, 'itemGlow')
+    glow.setAlpha(0.65)
+    glow.setDepth(1)
+
+    const heart = this.physics.add.sprite(x, y, 'heart')
+    heart.setData('type', 'heart')
+    heart.setData('glow', glow)
+    heart.setDepth(2)
+    this.items.add(heart)
+
+    this.tweens.add({
+      targets: [heart, glow],
+      y: y - 6,
+      duration: 700,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    })
+
+    this.tweens.add({
+      targets: glow,
+      scale: 1.18,
+      alpha: 0.32,
+      duration: 900,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    })
+
+    if (showLabel) {
+      this.showFloatingText(heart.x, heart.y - 30, 'POTION')
+    }
+  }
+
+  private spawnShield(showLabel = true) {
+    const { x, y } = this.getPickupSpawnPosition('shield')
+
+    const glow = this.add.image(x, y, 'itemGlow')
+    glow.setAlpha(0.65)
+    glow.setDepth(1)
+
+    const shield = this.physics.add.sprite(x, y, 'shieldItem')
+    shield.setData('type', 'shield')
+    shield.setData('glow', glow)
+    shield.setDepth(2)
+    this.items.add(shield)
+
+    this.tweens.add({
+      targets: [shield, glow],
+      y: y - 6,
+      duration: 700,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    })
+
+    this.tweens.add({
+      targets: glow,
+      scale: 1.18,
+      alpha: 0.32,
+      duration: 900,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    })
+
+    if (showLabel) {
+      this.showFloatingText(shield.x, shield.y - 30, 'SHIELD')
+    }
+  }
+
   private activateSpeedBoost(time: number) {
     this.playerSpeed = this.boostedPlayerSpeed
     this.speedBoostUntil = time + 4500
 
+    this.startSpeedBoostPulse()
     this.showFloatingText(this.player.x, this.player.y - 34, 'SPEED UP')
   }
+
+
 
   private updateSpeedBoost(time: number) {
     if (this.speedBoostUntil === 0) return
@@ -315,7 +504,31 @@ class MainScene extends Phaser.Scene {
     if (time >= this.speedBoostUntil) {
       this.playerSpeed = this.normalPlayerSpeed
       this.speedBoostUntil = 0
+      this.stopSpeedBoostPulse()
     }
+  }
+
+
+  private showLevelCompleteText() {
+    const text = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 90, 'DUSTY OUTSKIRTS CLEAR', {
+      fontFamily: 'monospace',
+      fontSize: '30px',
+      color: '#fff0a3',
+      stroke: '#2b1d16',
+      strokeThickness: 6,
+    }).setOrigin(0.5)
+
+    text.setAlpha(0)
+    text.setScale(0.92)
+
+    this.tweens.add({
+      targets: text,
+      alpha: 1,
+      scale: 1.05,
+      y: text.y - 4,
+      duration: 260,
+      ease: 'Back.easeOut',
+    })
   }
 
   private showWaveClearText() {
@@ -353,6 +566,231 @@ class MainScene extends Phaser.Scene {
       },
     })
   }
+
+  private pulseHealthUi() {
+    const targets: Phaser.GameObjects.GameObject[] = [
+      this.healthText,
+      ...this.heartIcons,
+    ]
+
+    this.tweens.killTweensOf(targets)
+
+    this.healthText.setScale(1)
+    this.heartIcons.forEach((heart) => {
+      heart.clearTint()
+      heart.setScale(1)
+    })
+
+    this.tweens.add({
+      targets,
+      scale: 1.16,
+      duration: 120,
+      yoyo: true,
+      repeat: 1,
+      ease: 'Sine.easeInOut',
+      onComplete: () => {
+        this.healthText.setScale(1)
+        this.heartIcons.forEach((heart) => heart.setScale(1))
+
+        if (this.speedBoostUntil > 0) {
+          this.startSpeedBoostPulse()
+        }
+      },
+    })
+  }
+
+
+  private startSpeedBoostPulse() {
+    const targets: Phaser.GameObjects.GameObject[] = [
+      this.healthText,
+      ...this.heartIcons,
+    ]
+
+    this.tweens.killTweensOf(targets)
+
+    this.healthText.setScale(1)
+    this.heartIcons.forEach((heart) => heart.setScale(1))
+
+    this.speedBoostPulse = this.tweens.add({
+      targets,
+      scale: 1.08,
+      duration: 260,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    })
+  }
+
+  private stopSpeedBoostPulse() {
+    const targets: Phaser.GameObjects.GameObject[] = [
+      this.healthText,
+      ...this.heartIcons,
+    ]
+
+    this.speedBoostPulse?.stop()
+    this.speedBoostPulse = undefined
+
+    this.tweens.killTweensOf(targets)
+
+    this.healthText.setScale(1)
+    this.heartIcons.forEach((heart) => heart.setScale(1))
+  }
+
+  private updateHealthDisplay() {
+    this.heartIcons.forEach((heart, index) => {
+      heart.setTexture(index < this.health ? 'hpHeartFull' : 'hpHeartEmpty')
+    })
+  }
+
+  private activateHeal() {
+    if (this.health < this.maxHealth) {
+      this.health += 1
+      this.updateHealthDisplay()
+      this.showFloatingText(this.player.x, this.player.y - 34, 'HP +1')
+    } else {
+      this.showFloatingText(this.player.x, this.player.y - 34, 'FULL HP')
+    }
+
+    this.pulseHealthUi()
+  }
+
+
+  private activateShield(time: number) {
+    this.shieldCharges = 1
+    this.shieldUntil = time + 7500
+
+    this.updateShieldStatus()
+    this.startShieldAura()
+
+    this.showFloatingText(this.player.x, this.player.y - 34, 'SHIELD +1')
+  }
+
+
+  private updateShieldStatus() {
+    if (this.shieldCharges > 0) {
+      this.shieldIcon.setVisible(true)
+      this.shieldCountText.setText(`${this.shieldCharges}`)
+      this.shieldCountText.setVisible(true)
+
+      this.tweens.killTweensOf([this.shieldIcon, this.shieldCountText])
+
+      this.shieldIcon.setScale(0.72)
+      this.shieldCountText.setScale(1)
+
+      this.tweens.add({
+        targets: this.shieldIcon,
+        scale: 0.9,
+        duration: 160,
+        yoyo: true,
+        ease: 'Back.easeOut',
+        onComplete: () => {
+          this.shieldIcon.setScale(0.72)
+        },
+      })
+
+      this.tweens.add({
+        targets: this.shieldCountText,
+        scale: 1.18,
+        duration: 160,
+        yoyo: true,
+        ease: 'Back.easeOut',
+        onComplete: () => {
+          this.shieldCountText.setScale(1)
+        },
+      })
+    } else {
+      this.shieldIcon.setVisible(false)
+      this.shieldCountText.setVisible(false)
+    }
+  }
+
+
+  private showBlockFlash() {
+    const flash = this.add.image(this.player.x, this.player.y, 'shieldAura')
+    flash.setDepth(3)
+    flash.setAlpha(0.82)
+    flash.setScale(0.85)
+
+    this.tweens.add({
+      targets: flash,
+      scale: 1.45,
+      alpha: 0,
+      duration: 260,
+      ease: 'Quad.easeOut',
+      onComplete: () => {
+        flash.destroy()
+      },
+    })
+  }
+
+
+  private startShieldAura() {
+    if (this.shieldAura && this.shieldAura.active) {
+      this.tweens.killTweensOf(this.shieldAura)
+      this.shieldAura.destroy()
+    }
+
+    this.shieldAura = this.add.image(this.player.x, this.player.y, 'shieldAura')
+    this.shieldAura.setDepth(2.5)
+    this.shieldAura.setAlpha(0.58)
+    this.shieldAura.setScale(0.9)
+
+    this.tweens.add({
+      targets: this.shieldAura,
+      scale: 1.12,
+      alpha: 0.34,
+      duration: 520,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    })
+  }
+
+  private updateShield(time: number) {
+    if (this.shieldCharges <= 0 || this.shieldUntil === 0) return
+
+    const remaining = this.shieldUntil - time
+
+    if (remaining <= 0) {
+      this.clearShield()
+      return
+    }
+
+    if (this.shieldAura && this.shieldAura.active) {
+      this.shieldAura.setPosition(this.player.x, this.player.y)
+    }
+
+    let shouldShow = true
+
+    if (remaining < 2500) {
+      const progress = 1 - remaining / 2500
+      const blinkInterval = Phaser.Math.Linear(240, 65, progress)
+      shouldShow = Math.floor(time / blinkInterval) % 2 === 0
+    }
+
+    this.shieldIcon.setVisible(shouldShow)
+    this.shieldCountText.setVisible(shouldShow)
+
+    if (this.shieldAura && this.shieldAura.active) {
+      this.shieldAura.setVisible(shouldShow)
+    }
+  }
+
+  private clearShield() {
+    this.shieldCharges = 0
+    this.shieldUntil = 0
+
+    this.shieldIcon.setVisible(false)
+    this.shieldCountText.setVisible(false)
+
+    if (this.shieldAura && this.shieldAura.active) {
+      this.tweens.killTweensOf(this.shieldAura)
+      this.shieldAura.destroy()
+    }
+
+    this.shieldAura = undefined
+  }
+
 
   private showFloatingText(x: number, y: number, text: string) {
     const popup = this.add.text(x, y, text, {
@@ -485,7 +923,69 @@ class MainScene extends Phaser.Scene {
     if (this.enemiesCleared < this.enemiesToSpawn) return
 
     this.isLevelClear = true
-    this.showWaveClearText()
+
+    this.time.delayedCall(750, () => {
+      if (this.isGameOver) return
+      this.startNextLevelOneWave()
+    })
+  }
+
+
+  private startNextLevelOneWave() {
+    if (this.hasTakenDamage && !this.heartIntroduced) {
+      this.startLevelOneWave('heart', 5)
+      return
+    }
+
+    if (!this.coffeeIntroduced) {
+      this.startLevelOneWave('coffee', 7)
+      return
+    }
+
+    if (!this.shieldIntroduced) {
+      this.startLevelOneWave('shield', 8)
+      return
+    }
+
+    if (!this.finalPressureWaveDone) {
+      this.finalPressureWaveDone = true
+      this.startLevelOneWave(null, 10, 'FINAL WAVE')
+      return
+    }
+
+    this.finishLevelOne()
+  }
+
+  private startLevelOneWave(item: PickupType | null, enemiesToSpawn: number, label?: string) {
+    this.clearItems()
+
+    this.wave += 1
+    this.enemiesToSpawn = enemiesToSpawn
+    this.enemiesSpawned = 0
+    this.enemiesCleared = 0
+    this.isLevelClear = false
+    this.currentWaveItem = item
+    this.itemSpawnedThisWave = false
+    this.levelStartTime = this.time.now
+    this.lastSpawnTime = 0
+
+    this.waveText.setText(`Wave: ${this.wave}`)
+  }
+
+  private finishLevelOne() {
+    this.clearItems()
+    this.currentWaveItem = null
+    this.itemSpawnedThisWave = false
+    this.isLevelClear = true
+
+    this.showLevelCompleteText()
+
+    this.time.delayedCall(1000, () => {
+      if (this.isGameOver) return
+
+      this.spawnHeart(true, true)
+      this.showFloatingText(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 80, 'SUPPLY DROP')
+    })
   }
 
   private addScore(basePoints: number, x: number, y: number) {
@@ -549,9 +1049,10 @@ class MainScene extends Phaser.Scene {
     const enemy = this.physics.add.sprite(x, y, 'enemy')
 
     const elapsed = this.levelStartTime > 0 ? time - this.levelStartTime : 0
-    const preCoffeePressure = !this.coffeeSpawned && elapsed >= 5000 ? 12 : 0
+    const preItemPressure = this.currentWaveItem === 'coffee' && !this.itemSpawnedThisWave && elapsed >= 1200 ? 12 : 0
+    const finalWavePressure = this.finalPressureWaveDone && this.currentWaveItem === null ? 14 : 0
 
-    enemy.setData('speed', Phaser.Math.Between(70, 105) + preCoffeePressure)
+    enemy.setData('speed', Phaser.Math.Between(70, 105) + preItemPressure + finalWavePressure)
     this.enemies.add(enemy)
     this.enemiesSpawned += 1
   }
@@ -640,6 +1141,64 @@ class MainScene extends Phaser.Scene {
     g.fillRect(15, 4, 3, 2)
 
     g.generateTexture('coffee', 30, 30)
+    g.clear()
+
+    g.fillStyle(0xc92f2f)
+    g.fillRect(9, 6, 12, 20)
+    g.fillStyle(0xffb3b3)
+    g.fillRect(11, 3, 8, 4)
+    g.fillStyle(0xffffff)
+    g.fillRect(13, 11, 4, 10)
+    g.fillRect(10, 14, 10, 4)
+    g.fillStyle(0x6b1515)
+    g.fillRect(11, 22, 8, 3)
+    g.generateTexture('heart', 30, 30)
+    g.clear()
+
+    g.fillStyle(0x8cc7ff)
+    g.fillRect(8, 5, 14, 6)
+    g.fillStyle(0x3d78c2)
+    g.fillRect(6, 10, 18, 10)
+    g.fillStyle(0x2d4f8f)
+    g.fillRect(9, 20, 12, 5)
+    g.fillStyle(0xffe6a7)
+    g.fillRect(13, 10, 4, 10)
+    g.fillRect(10, 13, 10, 4)
+    g.generateTexture('shieldItem', 30, 30)
+    g.clear()
+
+    g.lineStyle(3, 0x8cc7ff, 0.75)
+    g.strokeCircle(18, 18, 15)
+    g.lineStyle(2, 0xffffff, 0.42)
+    g.strokeCircle(18, 18, 11)
+    g.generateTexture('shieldAura', 36, 36)
+    g.clear()
+
+    g.fillStyle(0xff4b4b)
+    g.fillRect(5, 4, 5, 5)
+    g.fillRect(12, 4, 5, 5)
+    g.fillRect(3, 8, 16, 6)
+    g.fillRect(5, 14, 12, 4)
+    g.fillRect(8, 18, 6, 3)
+    g.generateTexture('hpHeartFull', 22, 22)
+    g.clear()
+
+    g.fillStyle(0xff4b4b)
+    g.fillRect(5, 4, 5, 5)
+    g.fillRect(12, 4, 5, 5)
+    g.fillRect(3, 8, 16, 6)
+    g.fillRect(5, 14, 12, 4)
+    g.fillRect(8, 18, 6, 3)
+
+    g.fillStyle(0x1e1611)
+    g.fillRect(6, 6, 3, 3)
+    g.fillRect(13, 6, 3, 3)
+    g.fillRect(5, 9, 12, 4)
+    g.fillRect(7, 14, 8, 3)
+    g.fillRect(9, 18, 4, 2)
+    g.generateTexture('hpHeartEmpty', 22, 22)
+    g.clear()
+
     g.destroy()
   }
 }
