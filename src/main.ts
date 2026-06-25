@@ -19,6 +19,7 @@ class MainScene extends Phaser.Scene {
 
   private scoreText!: Phaser.GameObjects.Text
   private healthText!: Phaser.GameObjects.Text
+  private waveText!: Phaser.GameObjects.Text
   private titleText!: Phaser.GameObjects.Text
   private startText!: Phaser.GameObjects.Text
   private tipText!: Phaser.GameObjects.Text
@@ -35,6 +36,12 @@ class MainScene extends Phaser.Scene {
 
   private levelStartTime = 0
   private coffeeSpawned = false
+
+  private wave = 1
+  private enemiesToSpawn = 4
+  private enemiesSpawned = 0
+  private enemiesCleared = 0
+  private isLevelClear = false
 
   constructor() {
     super('MainScene')
@@ -72,6 +79,12 @@ class MainScene extends Phaser.Scene {
       fontSize: '22px',
       color: '#ffb3a7',
     })
+
+    this.waveText = this.add.text(GAME_WIDTH - 24, 20, 'Wave: 1', {
+      fontFamily: 'monospace',
+      fontSize: '22px',
+      color: '#ffe6a7',
+    }).setOrigin(1, 0)
 
     this.titleText = this.add.text(GAME_WIDTH / 2, 210, 'PIXEL OUTLAW', {
       fontFamily: 'monospace',
@@ -138,7 +151,11 @@ class MainScene extends Phaser.Scene {
 
       if (this.health <= 0) {
         this.endGame()
+        return
       }
+
+      this.enemiesCleared += 1
+      this.checkWaveProgress()
     })
 
     this.physics.add.overlap(this.player, this.items, (_playerObject, itemObject) => {
@@ -193,6 +210,12 @@ class MainScene extends Phaser.Scene {
     this.speedBoostUntil = 0
     this.levelStartTime = 0
     this.coffeeSpawned = false
+
+    this.wave = 1
+    this.enemiesToSpawn = 4
+    this.enemiesSpawned = 0
+    this.enemiesCleared = 0
+    this.isLevelClear = false
   }
 
   private handleStartInput() {
@@ -212,6 +235,7 @@ class MainScene extends Phaser.Scene {
 
     this.isStarted = true
     this.levelStartTime = this.time.now
+    this.waveText.setText(`Wave: ${this.wave}`)
     this.player.setVisible(true)
     this.titleText.setVisible(false)
     this.startText.setVisible(false)
@@ -224,12 +248,13 @@ class MainScene extends Phaser.Scene {
 
     this.enemies.clear(true, true)
     this.bullets.clear(true, true)
+    this.clearItems()
 
     this.gameOverText.setText(`GAME OVER\nScore: ${this.score}\nPress R to restart`)
   }
 
     private updateLevelOne(time: number) {
-    if (this.levelStartTime === 0 || this.coffeeSpawned) return
+    if (this.levelStartTime === 0 || this.coffeeSpawned || this.isLevelClear) return
 
     const elapsed = time - this.levelStartTime
 
@@ -311,6 +336,16 @@ class MainScene extends Phaser.Scene {
       onComplete: () => {
         popup.destroy()
       },
+    })
+  }
+
+  private clearItems() {
+    this.items.getChildren().forEach((child) => {
+      const item = child as Phaser.Physics.Arcade.Sprite
+      const glow = item.getData('glow') as Phaser.GameObjects.Image | undefined
+
+      glow?.destroy()
+      item.destroy()
     })
   }
 
@@ -402,9 +437,19 @@ class MainScene extends Phaser.Scene {
           enemy.destroy()
 
           this.addScore(10, enemyX, enemyY)
+          this.enemiesCleared += 1
+          this.checkWaveProgress()
         }
       })
     })
+  }
+
+  private checkWaveProgress() {
+    if (this.isLevelClear) return
+    if (this.enemiesCleared < this.enemiesToSpawn) return
+
+    this.isLevelClear = true
+    this.showFloatingText(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 80, 'WAVE CLEAR')
   }
 
   private addScore(basePoints: number, x: number, y: number) {
@@ -443,6 +488,7 @@ class MainScene extends Phaser.Scene {
   private spawnEnemies(time: number) {
     const spawnCooldown = 900
 
+    if (this.isLevelClear || this.enemiesSpawned >= this.enemiesToSpawn) return
     if (time - this.lastSpawnTime < spawnCooldown) return
     this.lastSpawnTime = time
 
@@ -471,6 +517,7 @@ class MainScene extends Phaser.Scene {
 
     enemy.setData('speed', Phaser.Math.Between(70, 105) + preCoffeePressure)
     this.enemies.add(enemy)
+    this.enemiesSpawned += 1
   }
 
   private moveEnemies() {
