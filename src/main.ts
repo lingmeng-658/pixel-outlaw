@@ -318,6 +318,42 @@ class MainScene extends Phaser.Scene {
     }
   }
 
+  private showWaveClearText() {
+    const text = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 80, 'WAVE CLEAR', {
+      fontFamily: 'monospace',
+      fontSize: '38px',
+      color: '#fff0a3',
+      stroke: '#2b1d16',
+      strokeThickness: 6,
+    }).setOrigin(0.5)
+
+    text.setAlpha(0)
+    text.setScale(0.92)
+
+    this.tweens.add({
+      targets: text,
+      alpha: 1,
+      scale: 1.08,
+      y: text.y - 4,
+      duration: 220,
+      ease: 'Back.easeOut',
+      onComplete: () => {
+        this.tweens.add({
+          targets: text,
+          y: text.y - 28,
+          alpha: 0,
+          scale: 1.16,
+          duration: 650,
+          delay: 900,
+          ease: 'Sine.easeInOut',
+          onComplete: () => {
+            text.destroy()
+          },
+        })
+      },
+    })
+  }
+
   private showFloatingText(x: number, y: number, text: string) {
     const popup = this.add.text(x, y, text, {
       fontFamily: 'monospace',
@@ -449,7 +485,7 @@ class MainScene extends Phaser.Scene {
     if (this.enemiesCleared < this.enemiesToSpawn) return
 
     this.isLevelClear = true
-    this.showFloatingText(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 80, 'WAVE CLEAR')
+    this.showWaveClearText()
   }
 
   private addScore(basePoints: number, x: number, y: number) {
