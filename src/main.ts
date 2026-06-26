@@ -9,6 +9,8 @@ import {
   TIMING,
 } from './constants'
 import { LEVEL_ONE_CONFIG } from './levelOne'
+import { createLevelOneSaveData, SAVE_KEY } from './save'
+import { createTextures } from './textures'
 import type { LevelOneSaveStage, PickupType } from './types'
 
 class MainScene extends Phaser.Scene {
@@ -76,7 +78,7 @@ class MainScene extends Phaser.Scene {
 
   create(data?: { autoStart?: boolean }) {
     this.resetGameState()
-    this.createTextures()
+    createTextures(this)
 
     this.cameras.main.setBackgroundColor('#2b1d16')
     this.physics.world.setBounds(0, 0, GAME_WIDTH, GAME_HEIGHT)
@@ -314,7 +316,7 @@ class MainScene extends Phaser.Scene {
     this.lastShotTime = 0
     this.lastSpawnTime = 0
     this.lastDamageTime = 0
-    
+
     this.playerSpeed = this.normalPlayerSpeed
     this.speedBoostUntil = 0
     this.speedBoostPulse = undefined
@@ -462,16 +464,13 @@ class MainScene extends Phaser.Scene {
   }
 
   private saveAndQuit() {
-    const saveData = {
-      version: 1,
-      savedAt: new Date().toISOString(),
-      level: 1,
+    const saveData = createLevelOneSaveData({
       stage: this.getLevelOneSaveStage(),
       score: this.score,
       health: this.health,
-    }
+    })
 
-    localStorage.setItem('pixel-outlaw-save', JSON.stringify(saveData))
+    localStorage.setItem(SAVE_KEY, JSON.stringify(saveData))
 
     this.prepareSceneChangeFromPause()
     this.scene.restart()
@@ -512,7 +511,7 @@ class MainScene extends Phaser.Scene {
     this.gameOverText.setText(`GAME OVER\nScore: ${this.score}\nPress R to restart`)
   }
 
-    private updateLevelOne(time: number) {
+  private updateLevelOne(time: number) {
     if (this.levelStartTime === 0 || this.isLevelClear) return
     if (!this.currentWaveItem || this.itemSpawnedThisWave) return
 
@@ -1173,123 +1172,7 @@ class MainScene extends Phaser.Scene {
     })
   }
 
-  private createTextures() {
-    const g = this.make.graphics({ x: 0, y: 0 }, false)
 
-    g.fillStyle(0xc68642)
-    g.fillRect(4, 6, 20, 20)
-    g.fillStyle(0x3b2414)
-    g.fillRect(2, 2, 24, 8)
-    g.fillStyle(0xf7d08a)
-    g.fillRect(8, 10, 12, 10)
-    g.fillStyle(0x1e1611)
-    g.fillRect(9, 13, 3, 3)
-    g.fillRect(16, 13, 3, 3)
-    g.generateTexture('player', 28, 28)
-    g.clear()
-
-    g.fillStyle(0x7d2f2f)
-    g.fillRect(4, 4, 22, 22)
-    g.fillStyle(0xffd36b)
-    g.fillRect(8, 10, 4, 4)
-    g.fillRect(18, 10, 4, 4)
-    g.fillStyle(0x3a1010)
-    g.fillRect(9, 20, 12, 3)
-    g.generateTexture('enemy', 30, 30)
-    g.clear()
-
-    g.fillStyle(0xffe066)
-    g.fillCircle(5, 5, 5)
-    g.generateTexture('bullet', 10, 10)
-    g.clear()
-
-    g.fillStyle(0xfff0a3, 0.28)
-    g.fillCircle(18, 18, 16)
-    g.lineStyle(2, 0xffd166, 0.85)
-    g.strokeCircle(18, 18, 13)
-    g.generateTexture('itemGlow', 36, 36)
-    g.clear()
-
-    g.fillStyle(0xffd166)
-    g.fillRect(4, 7, 20, 18)
-
-    g.fillStyle(0x8b5a2b)
-    g.fillRect(6, 9, 16, 14)
-
-    g.fillStyle(0xf5c16c)
-    g.fillRect(8, 6, 12, 4)
-
-    g.fillStyle(0xffffff)
-    g.fillRect(21, 11, 5, 7)
-
-    g.fillStyle(0x3a2414)
-    g.fillRect(9, 12, 10, 7)
-
-    g.fillStyle(0xfff0a3)
-    g.fillRect(10, 4, 3, 2)
-    g.fillRect(15, 4, 3, 2)
-
-    g.generateTexture('coffee', 30, 30)
-    g.clear()
-
-    g.fillStyle(0xc92f2f)
-    g.fillRect(9, 6, 12, 20)
-    g.fillStyle(0xffb3b3)
-    g.fillRect(11, 3, 8, 4)
-    g.fillStyle(0xffffff)
-    g.fillRect(13, 11, 4, 10)
-    g.fillRect(10, 14, 10, 4)
-    g.fillStyle(0x6b1515)
-    g.fillRect(11, 22, 8, 3)
-    g.generateTexture('heart', 30, 30)
-    g.clear()
-
-    g.fillStyle(0x8cc7ff)
-    g.fillRect(8, 5, 14, 6)
-    g.fillStyle(0x3d78c2)
-    g.fillRect(6, 10, 18, 10)
-    g.fillStyle(0x2d4f8f)
-    g.fillRect(9, 20, 12, 5)
-    g.fillStyle(0xffe6a7)
-    g.fillRect(13, 10, 4, 10)
-    g.fillRect(10, 13, 10, 4)
-    g.generateTexture('shieldItem', 30, 30)
-    g.clear()
-
-    g.lineStyle(3, 0x8cc7ff, 0.75)
-    g.strokeCircle(18, 18, 15)
-    g.lineStyle(2, 0xffffff, 0.42)
-    g.strokeCircle(18, 18, 11)
-    g.generateTexture('shieldAura', 36, 36)
-    g.clear()
-
-    g.fillStyle(0xff4b4b)
-    g.fillRect(5, 4, 5, 5)
-    g.fillRect(12, 4, 5, 5)
-    g.fillRect(3, 8, 16, 6)
-    g.fillRect(5, 14, 12, 4)
-    g.fillRect(8, 18, 6, 3)
-    g.generateTexture('hpHeartFull', 22, 22)
-    g.clear()
-
-    g.fillStyle(0xff4b4b)
-    g.fillRect(5, 4, 5, 5)
-    g.fillRect(12, 4, 5, 5)
-    g.fillRect(3, 8, 16, 6)
-    g.fillRect(5, 14, 12, 4)
-    g.fillRect(8, 18, 6, 3)
-
-    g.fillStyle(0x1e1611)
-    g.fillRect(6, 6, 3, 3)
-    g.fillRect(13, 6, 3, 3)
-    g.fillRect(5, 9, 12, 4)
-    g.fillRect(7, 14, 8, 3)
-    g.fillRect(9, 18, 4, 2)
-    g.generateTexture('hpHeartEmpty', 22, 22)
-    g.clear()
-
-    g.destroy()
-  }
 }
 
 const config: Phaser.Types.Core.GameConfig = {
