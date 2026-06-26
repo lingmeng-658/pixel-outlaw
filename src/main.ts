@@ -18,6 +18,8 @@ class MainScene extends Phaser.Scene {
   private health = 3
   private isStarted = false
   private isGameOver = false
+  private isPaused = false
+  private pauseStartedAt = 0
 
   private scoreText!: Phaser.GameObjects.Text
   private healthText!: Phaser.GameObjects.Text
@@ -29,6 +31,8 @@ class MainScene extends Phaser.Scene {
   private startText!: Phaser.GameObjects.Text
   private tipText!: Phaser.GameObjects.Text
   private gameOverText!: Phaser.GameObjects.Text
+  private pauseOverlay!: Phaser.GameObjects.Rectangle
+  private pauseText!: Phaser.GameObjects.Text
 
   private lastShotTime = 0
   private lastSpawnTime = 0
@@ -41,7 +45,6 @@ class MainScene extends Phaser.Scene {
   private speedBoostPulse?: Phaser.Tweens.Tween
 
   private levelStartTime = 0
-  private coffeeSpawned = false
 
   private wave = 1
   private enemiesToSpawn = 4
@@ -66,7 +69,7 @@ class MainScene extends Phaser.Scene {
     super('MainScene')
   }
 
-  create() {
+  create(data?: { autoStart?: boolean }) {
     this.resetGameState()
     this.createTextures()
 
@@ -150,7 +153,7 @@ class MainScene extends Phaser.Scene {
 
     this.startText.setInteractive({ useHandCursor: true })
 
-    this.tipText = this.add.text(GAME_WIDTH / 2, 370, 'Click START or press SPACE\nWASD move  |  Arrow keys shoot', {
+    this.tipText = this.add.text(GAME_WIDTH / 2, 370, 'Click START or press SPACE\nWASD move  |  Arrow keys shoot  |  ESC pause', {
       fontFamily: 'monospace',
       fontSize: '20px',
       color: '#f5c16c',
@@ -167,11 +170,32 @@ class MainScene extends Phaser.Scene {
       strokeThickness: 6,
     }).setOrigin(0.5)
 
+    this.pauseOverlay = this.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0.46)
+    this.pauseOverlay.setDepth(100)
+    this.pauseOverlay.setVisible(false)
+
+    this.pauseText = this.add.text(
+      GAME_WIDTH / 2,
+      GAME_HEIGHT / 2,
+      'PAUSED\n\n[ESC] Continue\n[R] Restart Level\n[S] Save Progress & Quit',
+      {
+        fontFamily: 'monospace',
+        fontSize: '28px',
+        color: '#ffe6a7',
+        align: 'center',
+        stroke: '#2b1d16',
+        strokeThickness: 6,
+        lineSpacing: 10,
+      },
+    ).setOrigin(0.5)
+    this.pauseText.setDepth(101)
+    this.pauseText.setVisible(false)
+
     if (!this.input.keyboard) {
       throw new Error('Keyboard input is not available')
     }
 
-    this.keys = this.input.keyboard.addKeys('W,A,S,D,UP,DOWN,LEFT,RIGHT,SPACE,R') as Record<string, Phaser.Input.Keyboard.Key>
+    this.keys = this.input.keyboard.addKeys('W,A,S,D,UP,DOWN,LEFT,RIGHT,SPACE,R,ESC') as Record<string, Phaser.Input.Keyboard.Key>
 
     this.startText.on('pointerdown', () => {
       this.startGame()
@@ -237,6 +261,11 @@ class MainScene extends Phaser.Scene {
         this.activateShield(this.time.now)
       }
     })
+
+    if (data?.autoStart) {
+      this.startGame()
+    }
+
   }
 
   update(time: number, delta: number) {
@@ -247,6 +276,13 @@ class MainScene extends Phaser.Scene {
 
     if (this.isGameOver) {
       this.handleRestartInput()
+      return
+    }
+
+    this.handlePauseInput()
+
+    if (this.isPaused) {
+      this.handlePauseMenuInput()
       return
     }
 
@@ -267,6 +303,8 @@ class MainScene extends Phaser.Scene {
     this.health = 3
     this.isStarted = false
     this.isGameOver = false
+    this.isPaused = false
+    this.pauseStartedAt = 0
 
     this.lastShotTime = 0
     this.lastSpawnTime = 0
@@ -276,7 +314,6 @@ class MainScene extends Phaser.Scene {
     this.speedBoostUntil = 0
     this.speedBoostPulse = undefined
     this.levelStartTime = 0
-    this.coffeeSpawned = false
 
     this.wave = 1
     this.enemiesToSpawn = 4
@@ -303,6 +340,138 @@ class MainScene extends Phaser.Scene {
     }
   }
 
+  private handlePauseInput() {
+    if (Phaser.Input.Keyboard.JustDown(this.keys.ESC)) {
+      this.togglePause()
+    }
+  }
+
+  private handlePauseMenuInput() {
+    if (Phaser.Input.Keyboard.JustDown(this.keys.R)) {
+      this.restartCurrentLevel()
+      return
+    }
+
+    if (Phaser.Input.Keyboard.JustDown(this.keys.S)) {
+      this.saveAndQuit()
+    }
+  }
+
+  private togglePause() {
+    if (!this.isStarted || this.isGameOver) return
+
+    if (this.isPaused) {
+      this.resumeGame()
+    } else {
+      this.pauseGame()
+    }
+  }
+
+  private pauseGame() {
+    if (this.isPaused) return
+
+    this.isPaused = true
+    this.pauseStartedAt = Date.now()
+
+    this.player.setVelocity(0, 0)
+    this.enemies.getChildren().forEach((child) => {
+      const enemy = child as Phaser.Physics.Arcade.Sprite
+      enemy.setVelocity(0, 0)
+    })
+
+    this.physics.world.pause()
+    this.time.paused = true
+    this.tweens.pauseAll()
+
+    this.pauseOverlay.setVisible(true)
+    this.pauseText.setVisible(true)
+  }
+
+  private resumeGame() {
+    if (!this.isPaused) return
+
+    const pausedDuration = Date.now() - this.pauseStartedAt
+
+    if (this.speedBoostUntil > 0) {
+      this.speedBoostUntil += pausedDuration
+    }
+
+    if (this.shieldUntil > 0) {
+      this.shieldUntil += pausedDuration
+    }
+
+    if (this.levelStartTime > 0) {
+      this.levelStartTime += pausedDuration
+    }
+
+    this.isPaused = false
+    this.pauseStartedAt = 0
+
+    this.physics.world.resume()
+    this.time.paused = false
+    this.tweens.resumeAll()
+
+    this.pauseOverlay.setVisible(false)
+    this.pauseText.setVisible(false)
+  }
+
+  private prepareSceneChangeFromPause() {
+    this.isPaused = false
+    this.pauseStartedAt = 0
+
+    this.physics.world.resume()
+    this.time.paused = false
+    this.tweens.resumeAll()
+
+    this.pauseOverlay.setVisible(false)
+    this.pauseText.setVisible(false)
+  }
+
+  private restartCurrentLevel() {
+    this.prepareSceneChangeFromPause()
+    this.scene.restart({ autoStart: true })
+  }
+
+  private getLevelOneSaveStage() {
+    if (this.isLevelClear && this.finalPressureWaveDone) {
+      return 'clear'
+    }
+
+    if (this.currentWaveItem === 'heart') {
+      return 'heart'
+    }
+
+    if (this.currentWaveItem === 'coffee') {
+      return 'coffee'
+    }
+
+    if (this.currentWaveItem === 'shield') {
+      return 'shield'
+    }
+
+    if (this.finalPressureWaveDone && this.currentWaveItem === null) {
+      return 'final'
+    }
+
+    return 'intro'
+  }
+
+  private saveAndQuit() {
+    const saveData = {
+      version: 1,
+      savedAt: new Date().toISOString(),
+      level: 1,
+      stage: this.getLevelOneSaveStage(),
+      score: this.score,
+      health: this.health,
+    }
+
+    localStorage.setItem('pixel-outlaw-save', JSON.stringify(saveData))
+
+    this.prepareSceneChangeFromPause()
+    this.scene.restart()
+  }
+
   private handleRestartInput() {
     if (Phaser.Input.Keyboard.JustDown(this.keys.R)) {
       this.scene.restart()
@@ -322,6 +491,10 @@ class MainScene extends Phaser.Scene {
   }
 
   private endGame() {
+    if (this.isPaused) {
+      this.prepareSceneChangeFromPause()
+    }
+
     this.isGameOver = true
     this.player.setVelocity(0, 0)
     this.stopSpeedBoostPulse()
@@ -528,42 +701,6 @@ class MainScene extends Phaser.Scene {
       y: text.y - 4,
       duration: 260,
       ease: 'Back.easeOut',
-    })
-  }
-
-  private showWaveClearText() {
-    const text = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 80, 'WAVE CLEAR', {
-      fontFamily: 'monospace',
-      fontSize: '38px',
-      color: '#fff0a3',
-      stroke: '#2b1d16',
-      strokeThickness: 6,
-    }).setOrigin(0.5)
-
-    text.setAlpha(0)
-    text.setScale(0.92)
-
-    this.tweens.add({
-      targets: text,
-      alpha: 1,
-      scale: 1.08,
-      y: text.y - 4,
-      duration: 220,
-      ease: 'Back.easeOut',
-      onComplete: () => {
-        this.tweens.add({
-          targets: text,
-          y: text.y - 28,
-          alpha: 0,
-          scale: 1.16,
-          duration: 650,
-          delay: 900,
-          ease: 'Sine.easeInOut',
-          onComplete: () => {
-            text.destroy()
-          },
-        })
-      },
     })
   }
 
@@ -949,14 +1086,14 @@ class MainScene extends Phaser.Scene {
 
     if (!this.finalPressureWaveDone) {
       this.finalPressureWaveDone = true
-      this.startLevelOneWave(null, 10, 'FINAL WAVE')
+      this.startLevelOneWave(null, 10)
       return
     }
 
     this.finishLevelOne()
   }
 
-  private startLevelOneWave(item: PickupType | null, enemiesToSpawn: number, label?: string) {
+  private startLevelOneWave(item: PickupType | null, enemiesToSpawn: number) {
     this.clearItems()
 
     this.wave += 1
