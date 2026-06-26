@@ -1,10 +1,15 @@
 import Phaser from 'phaser'
 import './style.css'
-
-const GAME_WIDTH = 800
-const GAME_HEIGHT = 600
-
-type PickupType = 'coffee' | 'heart' | 'shield'
+import {
+  BULLET_SPEED,
+  GAME_HEIGHT,
+  GAME_WIDTH,
+  MAX_HEALTH,
+  PLAYER_SPEED,
+  TIMING,
+} from './constants'
+import { LEVEL_ONE_CONFIG } from './levelOne'
+import type { LevelOneSaveStage, PickupType } from './types'
 
 class MainScene extends Phaser.Scene {
   private player!: Phaser.Physics.Arcade.Sprite
@@ -15,7 +20,7 @@ class MainScene extends Phaser.Scene {
   private keys!: Record<string, Phaser.Input.Keyboard.Key>
 
   private score = 0
-  private health = 3
+  private health: number = MAX_HEALTH
   private isStarted = false
   private isGameOver = false
   private isPaused = false
@@ -38,21 +43,21 @@ class MainScene extends Phaser.Scene {
   private lastSpawnTime = 0
   private lastDamageTime = 0
 
-  private normalPlayerSpeed = 220
-  private boostedPlayerSpeed = 315
-  private playerSpeed = 220
+  private normalPlayerSpeed: number = PLAYER_SPEED.normal
+  private boostedPlayerSpeed: number = PLAYER_SPEED.boosted
+  private playerSpeed: number = PLAYER_SPEED.normal
   private speedBoostUntil = 0
   private speedBoostPulse?: Phaser.Tweens.Tween
 
   private levelStartTime = 0
 
   private wave = 1
-  private enemiesToSpawn = 4
+  private enemiesToSpawn: number = LEVEL_ONE_CONFIG.initialEnemies
   private enemiesSpawned = 0
   private enemiesCleared = 0
   private isLevelClear = false
 
-  private maxHealth = 3
+  private maxHealth: number = MAX_HEALTH
   private hasTakenDamage = false
   private currentWaveItem: PickupType | null = null
   private itemSpawnedThisWave = false
@@ -223,7 +228,7 @@ class MainScene extends Phaser.Scene {
         return
       }
 
-      if (now - this.lastDamageTime < 700) return
+      if (now - this.lastDamageTime < TIMING.damageCooldown) return
 
       this.lastDamageTime = now
       this.hasTakenDamage = true
@@ -300,7 +305,7 @@ class MainScene extends Phaser.Scene {
 
   private resetGameState() {
     this.score = 0
-    this.health = 3
+    this.health = MAX_HEALTH
     this.isStarted = false
     this.isGameOver = false
     this.isPaused = false
@@ -316,7 +321,7 @@ class MainScene extends Phaser.Scene {
     this.levelStartTime = 0
 
     this.wave = 1
-    this.enemiesToSpawn = 4
+    this.enemiesToSpawn = LEVEL_ONE_CONFIG.initialEnemies
     this.enemiesSpawned = 0
     this.enemiesCleared = 0
     this.isLevelClear = false
@@ -432,7 +437,7 @@ class MainScene extends Phaser.Scene {
     this.scene.restart({ autoStart: true })
   }
 
-  private getLevelOneSaveStage() {
+  private getLevelOneSaveStage(): LevelOneSaveStage {
     if (this.isLevelClear && this.finalPressureWaveDone) {
       return 'clear'
     }
@@ -512,7 +517,7 @@ class MainScene extends Phaser.Scene {
     if (!this.currentWaveItem || this.itemSpawnedThisWave) return
 
     const elapsed = time - this.levelStartTime
-    const itemSpawnDelay = this.currentWaveItem === 'heart' ? 700 : 1800
+    const itemSpawnDelay = this.currentWaveItem === 'heart' ? TIMING.heartPickupDelay : TIMING.pickupDelay
 
     if (elapsed >= itemSpawnDelay) {
       this.spawnPickup(this.currentWaveItem, true)
@@ -663,7 +668,7 @@ class MainScene extends Phaser.Scene {
 
   private activateSpeedBoost(time: number) {
     this.playerSpeed = this.boostedPlayerSpeed
-    this.speedBoostUntil = time + 4500
+    this.speedBoostUntil = time + TIMING.speedBoostDuration
 
     this.startSpeedBoostPulse()
     this.showFloatingText(this.player.x, this.player.y - 34, 'SPEED UP')
@@ -794,7 +799,7 @@ class MainScene extends Phaser.Scene {
 
   private activateShield(time: number) {
     this.shieldCharges = 1
-    this.shieldUntil = time + 7500
+    this.shieldUntil = time + TIMING.shieldDuration
 
     this.updateShieldStatus()
     this.startShieldAura()
@@ -978,11 +983,11 @@ class MainScene extends Phaser.Scene {
   }
 
   private handleShooting(time: number) {
-    const shootCooldown = 180
+    const shootCooldown = TIMING.shootCooldown
 
     if (time - this.lastShotTime < shootCooldown) return
 
-    const bulletSpeed = 460
+    const bulletSpeed = BULLET_SPEED
     let dx = 0
     let dy = 0
 
@@ -1061,7 +1066,7 @@ class MainScene extends Phaser.Scene {
 
     this.isLevelClear = true
 
-    this.time.delayedCall(750, () => {
+    this.time.delayedCall(TIMING.waveTransitionDelay, () => {
       if (this.isGameOver) return
       this.startNextLevelOneWave()
     })
@@ -1070,23 +1075,23 @@ class MainScene extends Phaser.Scene {
 
   private startNextLevelOneWave() {
     if (this.hasTakenDamage && !this.heartIntroduced) {
-      this.startLevelOneWave('heart', 5)
+      this.startLevelOneWave('heart', LEVEL_ONE_CONFIG.heartEnemies)
       return
     }
 
     if (!this.coffeeIntroduced) {
-      this.startLevelOneWave('coffee', 7)
+      this.startLevelOneWave('coffee', LEVEL_ONE_CONFIG.coffeeEnemies)
       return
     }
 
     if (!this.shieldIntroduced) {
-      this.startLevelOneWave('shield', 8)
+      this.startLevelOneWave('shield', LEVEL_ONE_CONFIG.shieldEnemies)
       return
     }
 
     if (!this.finalPressureWaveDone) {
       this.finalPressureWaveDone = true
-      this.startLevelOneWave(null, 10)
+      this.startLevelOneWave(null, LEVEL_ONE_CONFIG.finalEnemies)
       return
     }
 
@@ -1159,7 +1164,7 @@ class MainScene extends Phaser.Scene {
   }
 
   private spawnEnemies(time: number) {
-    const spawnCooldown = 900
+    const spawnCooldown = TIMING.enemySpawnCooldown
 
     if (this.isLevelClear || this.enemiesSpawned >= this.enemiesToSpawn) return
     if (time - this.lastSpawnTime < spawnCooldown) return
