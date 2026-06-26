@@ -555,39 +555,7 @@ class MainScene extends Phaser.Scene {
 
   private spawnCoffee(showLabel = true) {
     const { x, y } = this.getPickupSpawnPosition('coffee')
-
-    const glow = this.add.image(x, y, 'itemGlow')
-    glow.setAlpha(0.65)
-    glow.setDepth(1)
-
-    const coffee = this.physics.add.sprite(x, y, 'coffee')
-    coffee.setData('type', 'coffee')
-    coffee.setData('glow', glow)
-    coffee.setDepth(2)
-    this.items.add(coffee)
-
-    this.tweens.add({
-      targets: [coffee, glow],
-      y: y - 6,
-      duration: 700,
-      yoyo: true,
-      repeat: -1,
-      ease: 'Sine.easeInOut',
-    })
-
-    this.tweens.add({
-      targets: glow,
-      scale: 1.18,
-      alpha: 0.32,
-      duration: 900,
-      yoyo: true,
-      repeat: -1,
-      ease: 'Sine.easeInOut',
-    })
-
-    if (showLabel) {
-      this.showFloatingText(coffee.x, coffee.y - 30, 'COFFEE')
-    }
+    this.spawnPickupSprite('coffee', 'coffee', 'COFFEE', x, y, showLabel)
   }
 
   private spawnHeart(showLabel = true, fixedRewardPosition = false) {
@@ -595,55 +563,34 @@ class MainScene extends Phaser.Scene {
       ? { x: GAME_WIDTH / 2, y: GAME_HEIGHT / 2 + 90 }
       : this.getPickupSpawnPosition('heart')
 
-    const glow = this.add.image(x, y, 'itemGlow')
-    glow.setAlpha(0.65)
-    glow.setDepth(1)
-
-    const heart = this.physics.add.sprite(x, y, 'heart')
-    heart.setData('type', 'heart')
-    heart.setData('glow', glow)
-    heart.setDepth(2)
-    this.items.add(heart)
-
-    this.tweens.add({
-      targets: [heart, glow],
-      y: y - 6,
-      duration: 700,
-      yoyo: true,
-      repeat: -1,
-      ease: 'Sine.easeInOut',
-    })
-
-    this.tweens.add({
-      targets: glow,
-      scale: 1.18,
-      alpha: 0.32,
-      duration: 900,
-      yoyo: true,
-      repeat: -1,
-      ease: 'Sine.easeInOut',
-    })
-
-    if (showLabel) {
-      this.showFloatingText(heart.x, heart.y - 30, 'POTION')
-    }
+    this.spawnPickupSprite('heart', 'heart', 'POTION', x, y, showLabel)
   }
 
   private spawnShield(showLabel = true) {
     const { x, y } = this.getPickupSpawnPosition('shield')
+    this.spawnPickupSprite('shield', 'shieldItem', 'SHIELD', x, y, showLabel)
+  }
 
+  private spawnPickupSprite(
+    type: PickupType,
+    texture: string,
+    label: string,
+    x: number,
+    y: number,
+    showLabel: boolean,
+  ) {
     const glow = this.add.image(x, y, 'itemGlow')
     glow.setAlpha(0.65)
     glow.setDepth(1)
 
-    const shield = this.physics.add.sprite(x, y, 'shieldItem')
-    shield.setData('type', 'shield')
-    shield.setData('glow', glow)
-    shield.setDepth(2)
-    this.items.add(shield)
+    const pickup = this.physics.add.sprite(x, y, texture)
+    pickup.setData('type', type)
+    pickup.setData('glow', glow)
+    pickup.setDepth(2)
+    this.items.add(pickup)
 
     this.tweens.add({
-      targets: [shield, glow],
+      targets: [pickup, glow],
       y: y - 6,
       duration: 700,
       yoyo: true,
@@ -662,7 +609,7 @@ class MainScene extends Phaser.Scene {
     })
 
     if (showLabel) {
-      this.showFloatingText(shield.x, shield.y - 30, 'SHIELD')
+      this.showFloatingText(pickup.x, pickup.y - 30, label)
     }
   }
 
