@@ -13,6 +13,24 @@ Pixel Outlaw 是一个基于 Vite + TypeScript + Phaser 的西部像素风俯视
 - Phaser
 - 本地开发：npm run dev
 - 正式检查：npm run build
+- 线上部署：GitHub Pages + GitHub Actions
+
+## 线上试玩
+
+当前线上试玩地址：
+
+```txt
+https://lingmeng-658.github.io/pixel-outlaw/
+```
+
+当前部署方式：
+
+- `vite.config.ts` 设置 `base: '/pixel-outlaw/'`，适配 GitHub Pages 的仓库子路径。
+- `.github/workflows/deploy.yml` 在 push 到 `main` 后自动执行构建和部署。
+- 构建命令：`npm run build`
+- 部署产物目录：`dist`
+
+线上版本只会在代码 commit 并 push 到 GitHub 后，由 GitHub Actions 成功部署时更新；本地未提交或未 push 的改动不会影响线上版本。
 
 ## 当前代码结构
 
@@ -25,6 +43,8 @@ Pixel Outlaw 是一个基于 Vite + TypeScript + Phaser 的西部像素风俯视
 - `src/save.ts`：存档 key、第一关存档数据结构、创建第一关存档数据的方法。
 - `src/textures.ts`：临时像素纹理创建逻辑。
 - `src/style.css`：页面居中、背景、canvas 像素渲染和边框样式。
+- `vite.config.ts`：Vite 配置，当前主要用于 GitHub Pages 子路径部署。
+- `.github/workflows/deploy.yml`：GitHub Pages 自动部署工作流。
 
 当前重构原则：先保持玩法稳定，只把边界清晰、低风险的代码拆出去，不一次性大拆 UI、战斗和关卡控制。
 
@@ -105,13 +125,20 @@ pixel-outlaw-save
 - 将存档 key 和第一关存档数据构造从 `src/main.ts` 拆到 `src/save.ts`。
 - 保持玩法、数值、波次、道具效果不变。
 
+### 2026-07-19 线上试玩部署
+
+- 添加 `vite.config.ts`，设置 GitHub Pages 子路径 base。
+- 添加 GitHub Actions 部署工作流。
+- 使用 GitHub Pages 发布第一版线上试玩链接。
+- 当前版本适合电脑浏览器试玩，移动端触屏操作暂未适配。
+
 ## 开发收尾约定
 
 每轮开发或重构结束后，同步检查并更新：
 
 - `PROJECT_CONTEXT.md`：记录当前项目真实状态、设计决策、代码结构变化；以 GitHub 仓库里的版本为准，可以由助手直接更新。
-- `TODO.md`：记录下一步任务、优先级、暂不处理的内容；优先由助手给出本地修改方案，用户确认后本地提交并 push。
-- `DEVLOG.md`：记录当天完成内容、学到的东西、设计判断和下次继续；优先由助手给出本地修改方案，用户确认后本地提交并 push。
+- `TODO.md`：记录下一步任务、优先级、暂不处理的内容；优先由助手给出本地修改方案，用户确认后本地提交并 push；必要时也可以由助手直接在 GitHub 收尾。
+- `DEVLOG.md`：本地开发日志，只在用户本地维护，不上传 GitHub；助手可以给出追加内容，但不把它作为仓库文件处理。
 
 如果 GitHub 仓库中缺少某个文档，先确认本地路径和是否已经 push，不要直接覆盖已有文件结构。
 
