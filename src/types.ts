@@ -7,3 +7,5 @@ export type LevelOneSaveStage =
   | 'shield'
   | 'final'
   | 'clear'
+
+export type AreaId = 'dustyOutskirts' | 'townRoad'
