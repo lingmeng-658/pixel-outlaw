@@ -11,17 +11,19 @@ import {
 import { LEVEL_ONE_CONFIG } from './levelOne'
 import { createLevelOneSaveData, SAVE_KEY } from './save'
 import { createTextures } from './textures'
-import type { LevelOneSaveStage, PickupType } from './types'
+import type { AreaId, LevelOneSaveStage, PickupType } from './types'
 
 class MainScene extends Phaser.Scene {
   private player!: Phaser.Physics.Arcade.Sprite
   private bullets!: Phaser.Physics.Arcade.Group
   private enemies!: Phaser.Physics.Arcade.Group
   private items!: Phaser.Physics.Arcade.Group
+  private coinPickups!: Phaser.Physics.Arcade.Group
 
   private keys!: Record<string, Phaser.Input.Keyboard.Key>
 
   private score = 0
+  private coinCount = 0
   private health: number = MAX_HEALTH
   private isStarted = false
   private isGameOver = false
@@ -29,6 +31,8 @@ class MainScene extends Phaser.Scene {
   private pauseStartedAt = 0
 
   private scoreText!: Phaser.GameObjects.Text
+  private coinIcon!: Phaser.GameObjects.Image
+  private coinText!: Phaser.GameObjects.Text
   private healthText!: Phaser.GameObjects.Text
   private heartIcons: Phaser.GameObjects.Image[] = []
   private shieldIcon!: Phaser.GameObjects.Image
@@ -68,9 +72,23 @@ class MainScene extends Phaser.Scene {
   private shieldIntroduced = false
   private finalPressureWaveDone = false
 
+  private levelOneCoinDropTarget = 0
+  private levelOneCoinsDropped = 0
+  private levelOneEnemyDefeats = 0
+  private levelOneCoinDropDefeatTargets: number[] = []
+
   private shieldCharges = 0
   private shieldUntil = 0
   private shieldAura?: Phaser.GameObjects.Image
+
+  private currentArea: AreaId = 'dustyOutskirts'
+  private isAreaExitOpen = false
+  private isAreaTransitioning = false
+  private areaTransitionReadyAt = 0
+  private areaBackgroundObjects: Phaser.GameObjects.GameObject[] = []
+  private exitMarkerObjects: Phaser.GameObjects.GameObject[] = []
+  private areaTitleObjects: Phaser.GameObjects.GameObject[] = []
+  private levelCompleteText?: Phaser.GameObjects.Text
 
   constructor() {
     super('MainScene')
@@ -83,25 +101,25 @@ class MainScene extends Phaser.Scene {
     this.cameras.main.setBackgroundColor('#2b1d16')
     this.physics.world.setBounds(0, 0, GAME_WIDTH, GAME_HEIGHT)
 
-    this.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH - 48, GAME_HEIGHT - 48, 0x6b4a2b)
-      .setStrokeStyle(4, 0xd2a15f)
-
-    this.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH - 88, GAME_HEIGHT - 88, 0x7b5734)
-      .setStrokeStyle(2, 0x3a2414)
+    this.drawDustyOutskirtsBackground()
 
     this.player = this.physics.add.sprite(GAME_WIDTH / 2, GAME_HEIGHT / 2, 'player')
     this.player.setCollideWorldBounds(true)
+    this.player.setDepth(5)
     this.player.setVisible(false)
 
     this.bullets = this.physics.add.group()
     this.enemies = this.physics.add.group()
     this.items = this.physics.add.group()
+    this.coinPickups = this.physics.add.group()
 
-    this.scoreText = this.add.text(24, 20, 'Score: 0', {
+    this.scoreText = this.add.text(GAME_WIDTH - 24, 20, 'Score: 0', {
       fontFamily: 'monospace',
       fontSize: '22px',
       color: '#ffe6a7',
-    })
+      stroke: '#2b1d16',
+      strokeThickness: 3,
+    }).setOrigin(1, 0)
 
     this.healthText = this.add.text(24, 50, 'HP', {
       fontFamily: 'monospace',
@@ -118,6 +136,18 @@ class MainScene extends Phaser.Scene {
       this.heartIcons.push(heart)
     }
 
+    this.coinIcon = this.add.image(38, 94, 'coin')
+    this.coinIcon.setOrigin(0.5)
+    this.coinIcon.setScale(0.86)
+
+    this.coinText = this.add.text(54, 82, '：0', {
+      fontFamily: 'monospace',
+      fontSize: '20px',
+      color: '#ffd166',
+      stroke: '#2b1d16',
+      strokeThickness: 3,
+    })
+
     const shieldX = 66 + this.maxHealth * 26 + 14
     this.shieldIcon = this.add.image(shieldX, 62, 'shieldItem')
     this.shieldIcon.setScale(0.72)
@@ -132,12 +162,15 @@ class MainScene extends Phaser.Scene {
     }).setVisible(false)
 
     this.updateHealthDisplay()
+    this.updateCoinDisplay()
 
-    this.waveText = this.add.text(GAME_WIDTH - 24, 20, 'Wave: 1', {
+    this.waveText = this.add.text(GAME_WIDTH - 24, GAME_HEIGHT - 24, 'Wave: 1', {
       fontFamily: 'monospace',
-      fontSize: '22px',
+      fontSize: '18px',
       color: '#ffe6a7',
-    }).setOrigin(1, 0).setVisible(false)
+      stroke: '#2b1d16',
+      strokeThickness: 3,
+    }).setOrigin(1, 1).setVisible(false)
 
     this.titleText = this.add.text(GAME_WIDTH / 2, 210, 'PIXEL OUTLAW', {
       fontFamily: 'monospace',
@@ -175,7 +208,7 @@ class MainScene extends Phaser.Scene {
       align: 'center',
       stroke: '#2b1d16',
       strokeThickness: 6,
-    }).setOrigin(0.5)
+    }).setOrigin(0.5).setDepth(20)
 
     this.pauseOverlay = this.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0.46)
     this.pauseOverlay.setDepth(100)
@@ -202,14 +235,14 @@ class MainScene extends Phaser.Scene {
       throw new Error('Keyboard input is not available')
     }
 
-    this.keys = this.input.keyboard.addKeys('W,A,S,D,UP,DOWN,LEFT,RIGHT,SPACE,R,ESC') as Record<string, Phaser.Input.Keyboard.Key>
+    this.keys = this.input.keyboard.addKeys('W,A,S,D,UP,DOWN,LEFT,RIGHT,SPACE,R,ESC,K') as Record<string, Phaser.Input.Keyboard.Key>
 
     this.startText.on('pointerdown', () => {
       this.startGame()
     })
 
     this.physics.add.overlap(this.player, this.enemies, (_playerObject, enemyObject) => {
-      if (!this.isStarted || this.isGameOver) return
+      if (!this.isStarted || this.isGameOver || this.isAreaTransitioning) return
 
       const now = this.time.now
       const enemy = enemyObject as Phaser.Physics.Arcade.Sprite
@@ -251,7 +284,7 @@ class MainScene extends Phaser.Scene {
     })
 
     this.physics.add.overlap(this.player, this.items, (_playerObject, itemObject) => {
-      if (!this.isStarted || this.isGameOver) return
+      if (!this.isStarted || this.isGameOver || this.isAreaTransitioning) return
 
       const item = itemObject as Phaser.Physics.Arcade.Sprite
       const itemType = item.getData('type') as string
@@ -269,13 +302,28 @@ class MainScene extends Phaser.Scene {
       }
     })
 
+    this.physics.add.overlap(this.player, this.coinPickups, (_playerObject, coinObject) => {
+      if (!this.isStarted || this.isGameOver || this.isAreaTransitioning) return
+
+      const coin = coinObject as Phaser.Physics.Arcade.Sprite
+      const amount = coin.getData('amount') as number | undefined
+
+      this.tweens.killTweensOf(coin)
+      coin.destroy()
+      this.coinCount += amount ?? 1
+      this.updateCoinDisplay()
+      this.pulseCoinUi()
+      this.showFloatingText(this.player.x, this.player.y - 34, '+1 GOLD')
+    })
+
     if (data?.autoStart) {
       this.startGame()
     }
-
   }
 
   update(time: number, delta: number) {
+    this.handleDevShortcuts()
+
     if (!this.isStarted) {
       this.handleStartInput()
       return
@@ -293,20 +341,173 @@ class MainScene extends Phaser.Scene {
       return
     }
 
-    this.updateLevelOne(time)
+    if (this.isAreaTransitioning) {
+      this.player.setVelocity(0, 0)
+      return
+    }
+
+    if (this.currentArea === 'townRoad') {
+      this.handleTownRoadInput()
+    }
+
+    if (this.currentArea === 'dustyOutskirts') {
+      this.updateLevelOne(time)
+    }
+
     this.updateSpeedBoost(time)
     this.updateShield(time)
     this.handlePlayerMove()
     this.handleShooting(time)
     this.moveBullets(delta)
-    this.spawnEnemies(time)
-    this.moveEnemies()
-    this.checkBulletEnemyHits()
+
+    if (this.currentArea === 'dustyOutskirts') {
+      this.spawnEnemies(time)
+      this.moveEnemies()
+      this.checkBulletEnemyHits()
+      this.checkAreaExit()
+    }
+
     this.cleanBullets()
+  }
+
+  private clearAreaBackground() {
+    this.areaBackgroundObjects.forEach((object) => object.destroy())
+    this.areaBackgroundObjects = []
+  }
+
+  private clearExitMarkers() {
+    this.exitMarkerObjects.forEach((object) => {
+      this.tweens.killTweensOf(object)
+      object.destroy()
+    })
+    this.exitMarkerObjects = []
+  }
+
+  private clearAreaTitle() {
+    this.areaTitleObjects.forEach((object) => {
+      this.tweens.killTweensOf(object)
+      object.destroy()
+    })
+    this.areaTitleObjects = []
+  }
+
+  private clearLevelCompleteText() {
+    if (!this.levelCompleteText) return
+
+    this.tweens.killTweensOf(this.levelCompleteText)
+    this.levelCompleteText.destroy()
+    this.levelCompleteText = undefined
+  }
+
+  private drawDustyOutskirtsBackground() {
+    this.clearAreaBackground()
+
+    const outerGround = this.add.rectangle(
+      GAME_WIDTH / 2,
+      GAME_HEIGHT / 2,
+      GAME_WIDTH - 48,
+      GAME_HEIGHT - 48,
+      0x6b4a2b,
+    )
+    outerGround.setStrokeStyle(4, 0xd2a15f)
+    outerGround.setDepth(-5)
+
+    const innerGround = this.add.rectangle(
+      GAME_WIDTH / 2,
+      GAME_HEIGHT / 2,
+      GAME_WIDTH - 88,
+      GAME_HEIGHT - 88,
+      0x7b5734,
+    )
+    innerGround.setStrokeStyle(2, 0x3a2414)
+    innerGround.setDepth(-4)
+
+    this.areaBackgroundObjects = [outerGround, innerGround]
+  }
+
+  private drawTownRoadBackground() {
+    this.clearAreaBackground()
+
+    const outerGround = this.add.rectangle(
+      GAME_WIDTH / 2,
+      GAME_HEIGHT / 2,
+      GAME_WIDTH - 48,
+      GAME_HEIGHT - 48,
+      0x56613c,
+    )
+    outerGround.setStrokeStyle(4, 0xd2a15f)
+    outerGround.setDepth(-5)
+
+    const innerGround = this.add.rectangle(
+      GAME_WIDTH / 2,
+      GAME_HEIGHT / 2,
+      GAME_WIDTH - 88,
+      GAME_HEIGHT - 88,
+      0x667849,
+    )
+    innerGround.setStrokeStyle(2, 0x2f3a22)
+    innerGround.setDepth(-4)
+
+    const road = this.add.rectangle(
+      GAME_WIDTH / 2,
+      GAME_HEIGHT / 2,
+      122,
+      GAME_HEIGHT - 120,
+      0x755036,
+      0.78,
+    )
+    road.setDepth(-3)
+
+    const roadHighlight = this.add.rectangle(
+      GAME_WIDTH / 2 - 20,
+      GAME_HEIGHT / 2,
+      24,
+      GAME_HEIGHT - 140,
+      0x8a6241,
+      0.28,
+    )
+    roadHighlight.setDepth(-2)
+
+    const southTrail = this.add.rectangle(
+      GAME_WIDTH / 2,
+      GAME_HEIGHT - 42,
+      156,
+      74,
+      0x755036,
+      0.78,
+    )
+    southTrail.setDepth(-3)
+
+    const returnSign = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 76, 'BACK TO OUTSKIRTS', {
+      fontFamily: 'monospace',
+      fontSize: '15px',
+      color: '#ffe6a7',
+      stroke: '#2b1d16',
+      strokeThickness: 4,
+    }).setOrigin(0.5).setDepth(8)
+
+    const returnArrow = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 42, '↓', {
+      fontFamily: 'monospace',
+      fontSize: '28px',
+      color: '#ffe6a7',
+      stroke: '#2b1d16',
+      strokeThickness: 4,
+    }).setOrigin(0.5).setDepth(8)
+
+    this.areaBackgroundObjects = [
+      outerGround,
+      innerGround,
+      road,
+      roadHighlight,
+      southTrail,
+      returnSign,
+      returnArrow,
+    ]
   }
 
   private resetGameState() {
     this.score = 0
+    this.coinCount = 0
     this.health = MAX_HEALTH
     this.isStarted = false
     this.isGameOver = false
@@ -336,15 +537,61 @@ class MainScene extends Phaser.Scene {
     this.shieldIntroduced = false
     this.finalPressureWaveDone = false
 
+    this.levelOneCoinDropTarget = Phaser.Math.Between(2, 3)
+    this.levelOneCoinsDropped = 0
+    this.levelOneEnemyDefeats = 0
+    this.levelOneCoinDropDefeatTargets = this.levelOneCoinDropTarget === 3
+      ? [
+          Phaser.Math.Between(2, 4),
+          Phaser.Math.Between(8, 11),
+          Phaser.Math.Between(16, 21),
+        ]
+      : [
+          Phaser.Math.Between(3, 5),
+          Phaser.Math.Between(12, 17),
+        ]
+
     this.shieldCharges = 0
     this.shieldUntil = 0
     this.shieldAura = undefined
+
+    this.currentArea = 'dustyOutskirts'
+    this.isAreaExitOpen = false
+    this.isAreaTransitioning = false
+    this.areaTransitionReadyAt = 0
+    this.areaBackgroundObjects = []
+    this.exitMarkerObjects = []
+    this.areaTitleObjects = []
+    this.levelCompleteText = undefined
   }
 
   private handleStartInput() {
     if (Phaser.Input.Keyboard.JustDown(this.keys.SPACE)) {
       this.startGame()
     }
+  }
+
+  private handleDevShortcuts() {
+    const isLocalDevHost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+
+    if (!isLocalDevHost) return
+
+    if (Phaser.Input.Keyboard.JustDown(this.keys.K)) {
+      if (!this.isStarted) {
+        this.startGame()
+      }
+
+      this.debugOpenDustyOutskirtsExit()
+    }
+  }
+
+  private handleTownRoadInput() {
+    if (Phaser.Input.Keyboard.JustDown(this.keys.R)) {
+      this.scene.restart({ autoStart: true })
+      return
+    }
+
+    this.checkTownRoadReturnExit()
   }
 
   private handlePauseInput() {
@@ -365,7 +612,7 @@ class MainScene extends Phaser.Scene {
   }
 
   private togglePause() {
-    if (!this.isStarted || this.isGameOver) return
+    if (!this.isStarted || this.isGameOver || this.isAreaTransitioning) return
 
     if (this.isPaused) {
       this.resumeGame()
@@ -488,6 +735,7 @@ class MainScene extends Phaser.Scene {
     this.isStarted = true
     this.levelStartTime = this.time.now
     this.waveText.setText(`Wave: ${this.wave}`)
+    this.waveText.setVisible(true)
     this.player.setVisible(true)
     this.titleText.setVisible(false)
     this.startText.setVisible(false)
@@ -507,8 +755,9 @@ class MainScene extends Phaser.Scene {
     this.enemies.clear(true, true)
     this.bullets.clear(true, true)
     this.clearItems()
+    this.clearCoinPickups()
 
-    this.gameOverText.setText(`GAME OVER\nScore: ${this.score}\nPress R to restart`)
+    this.gameOverText.setText(`GAME OVER\nScore: ${this.score}\nGold: ${this.coinCount}\nPress R to restart`)
   }
 
   private updateLevelOne(time: number) {
@@ -523,7 +772,6 @@ class MainScene extends Phaser.Scene {
       this.itemSpawnedThisWave = true
     }
   }
-
 
   private getPickupSpawnPosition(type: PickupType) {
     if (type === 'heart') {
@@ -620,8 +868,6 @@ class MainScene extends Phaser.Scene {
     this.showFloatingText(this.player.x, this.player.y - 34, 'SPEED UP')
   }
 
-
-
   private updateSpeedBoost(time: number) {
     if (this.speedBoostUntil === 0) return
 
@@ -632,15 +878,18 @@ class MainScene extends Phaser.Scene {
     }
   }
 
-
   private showLevelCompleteText() {
+    this.clearLevelCompleteText()
+
     const text = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 90, 'DUSTY OUTSKIRTS CLEAR', {
       fontFamily: 'monospace',
       fontSize: '30px',
       color: '#fff0a3',
       stroke: '#2b1d16',
       strokeThickness: 6,
-    }).setOrigin(0.5)
+    }).setOrigin(0.5).setDepth(12)
+
+    this.levelCompleteText = text
 
     text.setAlpha(0)
     text.setScale(0.92)
@@ -652,6 +901,17 @@ class MainScene extends Phaser.Scene {
       y: text.y - 4,
       duration: 260,
       ease: 'Back.easeOut',
+    })
+
+    this.tweens.add({
+      targets: text,
+      alpha: 0,
+      delay: 1500,
+      duration: 500,
+      ease: 'Sine.easeInOut',
+      onComplete: () => {
+        this.clearLevelCompleteText()
+      },
     })
   }
 
@@ -686,7 +946,6 @@ class MainScene extends Phaser.Scene {
       },
     })
   }
-
 
   private startSpeedBoostPulse() {
     const targets: Phaser.GameObjects.GameObject[] = [
@@ -730,6 +989,32 @@ class MainScene extends Phaser.Scene {
     })
   }
 
+  private updateCoinDisplay() {
+    this.coinText.setText(`：${this.coinCount}`)
+  }
+
+  private pulseCoinUi() {
+    const targets = [this.coinIcon, this.coinText]
+
+    this.tweens.killTweensOf(targets)
+
+    this.coinIcon.setScale(0.86)
+    this.coinText.setScale(1)
+
+    this.tweens.add({
+      targets,
+      scale: 1.16,
+      duration: 120,
+      yoyo: true,
+      repeat: 1,
+      ease: 'Sine.easeInOut',
+      onComplete: () => {
+        this.coinIcon.setScale(0.86)
+        this.coinText.setScale(1)
+      },
+    })
+  }
+
   private activateHeal() {
     if (this.health < this.maxHealth) {
       this.health += 1
@@ -742,7 +1027,6 @@ class MainScene extends Phaser.Scene {
     this.pulseHealthUi()
   }
 
-
   private activateShield(time: number) {
     this.shieldCharges = 1
     this.shieldUntil = time + TIMING.shieldDuration
@@ -752,7 +1036,6 @@ class MainScene extends Phaser.Scene {
 
     this.showFloatingText(this.player.x, this.player.y - 34, 'SHIELD +1')
   }
-
 
   private updateShieldStatus() {
     if (this.shieldCharges > 0) {
@@ -792,7 +1075,6 @@ class MainScene extends Phaser.Scene {
     }
   }
 
-
   private showBlockFlash() {
     const flash = this.add.image(this.player.x, this.player.y, 'shieldAura')
     flash.setDepth(3)
@@ -810,7 +1092,6 @@ class MainScene extends Phaser.Scene {
       },
     })
   }
-
 
   private startShieldAura() {
     if (this.shieldAura && this.shieldAura.active) {
@@ -879,7 +1160,6 @@ class MainScene extends Phaser.Scene {
     this.shieldAura = undefined
   }
 
-
   private showFloatingText(x: number, y: number, text: string) {
     const popup = this.add.text(x, y, text, {
       fontFamily: 'monospace',
@@ -887,7 +1167,7 @@ class MainScene extends Phaser.Scene {
       color: '#b8f28b',
       stroke: '#1e1611',
       strokeThickness: 3,
-    }).setOrigin(0.5)
+    }).setOrigin(0.5).setDepth(15)
 
     this.tweens.add({
       targets: popup,
@@ -908,6 +1188,13 @@ class MainScene extends Phaser.Scene {
 
       glow?.destroy()
       item.destroy()
+    })
+  }
+
+  private clearCoinPickups() {
+    this.coinPickups.getChildren().forEach((child) => {
+      this.tweens.killTweensOf(child)
+      child.destroy()
     })
   }
 
@@ -999,6 +1286,7 @@ class MainScene extends Phaser.Scene {
           enemy.destroy()
 
           this.addScore(10, enemyX, enemyY)
+          this.registerEnemyDefeat(enemyX, enemyY)
           this.enemiesCleared += 1
           this.checkWaveProgress()
         }
@@ -1017,7 +1305,6 @@ class MainScene extends Phaser.Scene {
       this.startNextLevelOneWave()
     })
   }
-
 
   private startNextLevelOneWave() {
     if (this.hasTakenDamage && !this.heartIntroduced) {
@@ -1065,19 +1352,245 @@ class MainScene extends Phaser.Scene {
     this.currentWaveItem = null
     this.itemSpawnedThisWave = false
     this.isLevelClear = true
+    this.isAreaExitOpen = false
 
     this.showLevelCompleteText()
 
-    this.time.delayedCall(1000, () => {
-      if (this.isGameOver) return
+    this.time.delayedCall(900, () => {
+      if (this.isGameOver || this.currentArea !== 'dustyOutskirts') return
 
       this.spawnHeart(true, true)
       this.showFloatingText(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 80, 'SUPPLY DROP')
     })
+
+    this.time.delayedCall(1400, () => {
+      if (this.isGameOver || this.currentArea !== 'dustyOutskirts') return
+
+      this.unlockAreaExit()
+    })
+  }
+
+  private debugOpenDustyOutskirtsExit() {
+    if (this.currentArea !== 'dustyOutskirts') return
+
+    if (this.isPaused) {
+      this.prepareSceneChangeFromPause()
+    }
+
+    this.enemies.clear(true, true)
+    this.bullets.clear(true, true)
+    this.clearItems()
+
+    this.currentWaveItem = null
+    this.itemSpawnedThisWave = false
+    this.finalPressureWaveDone = true
+    this.isLevelClear = true
+
+    this.showLevelCompleteText()
+    this.unlockAreaExit()
+    this.showFloatingText(GAME_WIDTH / 2, 132, 'DEBUG EXIT OPEN')
+  }
+
+  private unlockAreaExit() {
+    if (this.isAreaExitOpen || this.currentArea !== 'dustyOutskirts') return
+
+    this.clearExitMarkers()
+    this.isAreaExitOpen = true
+
+    const road = this.add.rectangle(GAME_WIDTH / 2, 42, 184, 84, 0x3f2b1b, 0.92)
+    road.setStrokeStyle(3, 0xf5c16c)
+    road.setDepth(1)
+
+    const arrow = this.add.text(GAME_WIDTH / 2, 26, '↑', {
+      fontFamily: 'monospace',
+      fontSize: '34px',
+      color: '#ffe6a7',
+      stroke: '#2b1d16',
+      strokeThickness: 5,
+    }).setOrigin(0.5).setDepth(8)
+
+    const sign = this.add.text(GAME_WIDTH / 2, 55, 'ROAD TO TOWN', {
+      fontFamily: 'monospace',
+      fontSize: '18px',
+      color: '#ffe6a7',
+      stroke: '#2b1d16',
+      strokeThickness: 4,
+    }).setOrigin(0.5).setDepth(8)
+
+    const prompt = this.add.text(GAME_WIDTH / 2, 96, 'Move north to continue', {
+      fontFamily: 'monospace',
+      fontSize: '16px',
+      color: '#f5c16c',
+      stroke: '#2b1d16',
+      strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(8)
+
+    this.exitMarkerObjects = [road, arrow, sign, prompt]
+
+    this.tweens.add({
+      targets: prompt,
+      alpha: 0.45,
+      duration: 700,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    })
+
+    this.showFloatingText(GAME_WIDTH / 2, 126, 'EXIT OPEN')
+  }
+
+  private checkAreaExit() {
+    if (!this.isAreaExitOpen || this.currentArea !== 'dustyOutskirts') return
+    if (this.isPaused || this.isGameOver || this.isAreaTransitioning) return
+    if (this.time.now < this.areaTransitionReadyAt) return
+
+    const isInsideExitX = Math.abs(this.player.x - GAME_WIDTH / 2) <= 92
+    const reachedNorthRoad = this.player.y <= 88
+
+    if (isInsideExitX && reachedNorthRoad) {
+      this.transitionToTownRoad()
+    }
+  }
+
+  private transitionToTownRoad() {
+    if (this.currentArea !== 'dustyOutskirts' || this.isAreaTransitioning) return
+
+    this.isAreaTransitioning = true
+    this.player.setVelocity(0, 0)
+    this.physics.world.pause()
+
+    this.cameras.main.fadeOut(280, 0, 0, 0)
+
+    this.time.delayedCall(320, () => {
+      this.enterTownRoad()
+      this.physics.world.resume()
+      this.cameras.main.fadeIn(280, 0, 0, 0)
+      this.isAreaTransitioning = false
+      this.areaTransitionReadyAt = this.time.now + 300
+    })
+  }
+
+  private checkTownRoadReturnExit() {
+    if (this.currentArea !== 'townRoad' || this.isAreaTransitioning) return
+    if (this.time.now < this.areaTransitionReadyAt) return
+
+    const isInsideSouthExitX = Math.abs(this.player.x - GAME_WIDTH / 2) <= 82
+    const reachedSouthRoad = this.player.y >= GAME_HEIGHT - 58
+
+    if (isInsideSouthExitX && reachedSouthRoad) {
+      this.transitionToDustyOutskirts()
+    }
+  }
+
+  private transitionToDustyOutskirts() {
+    if (this.currentArea !== 'townRoad' || this.isAreaTransitioning) return
+
+    this.isAreaTransitioning = true
+    this.player.setVelocity(0, 0)
+    this.physics.world.pause()
+
+    this.cameras.main.fadeOut(280, 0, 0, 0)
+
+    this.time.delayedCall(320, () => {
+      this.enterDustyOutskirtsFromTownRoad()
+      this.physics.world.resume()
+      this.cameras.main.fadeIn(280, 0, 0, 0)
+      this.isAreaTransitioning = false
+      this.areaTransitionReadyAt = this.time.now + 300
+    })
+  }
+
+  private enterTownRoad() {
+    this.currentArea = 'townRoad'
+    this.isAreaExitOpen = false
+    this.isLevelClear = true
+    this.currentWaveItem = null
+    this.itemSpawnedThisWave = false
+
+    this.enemies.clear(true, true)
+    this.bullets.clear(true, true)
+    this.clearItems()
+    this.clearCoinPickups()
+    this.clearShield()
+    this.clearExitMarkers()
+    this.clearAreaTitle()
+    this.clearLevelCompleteText()
+
+    this.drawTownRoadBackground()
+
+    this.player.setPosition(GAME_WIDTH / 2, GAME_HEIGHT - 116)
+    this.player.setVelocity(0, 0)
+    this.player.setDepth(5)
+
+    this.waveText.setVisible(true)
+    this.waveText.setText('Area: Town Road')
+
+    this.showAreaTitle('TOWN ROAD', 'More coming soon  |  Press R to restart')
+  }
+
+  private enterDustyOutskirtsFromTownRoad() {
+    this.currentArea = 'dustyOutskirts'
+    this.isLevelClear = true
+    this.currentWaveItem = null
+    this.itemSpawnedThisWave = false
+
+    this.enemies.clear(true, true)
+    this.bullets.clear(true, true)
+    this.clearItems()
+    this.clearCoinPickups()
+    this.clearShield()
+    this.clearAreaTitle()
+    this.clearLevelCompleteText()
+
+    this.drawDustyOutskirtsBackground()
+
+    this.player.setPosition(GAME_WIDTH / 2, 124)
+    this.player.setVelocity(0, 0)
+    this.player.setDepth(5)
+
+    this.waveText.setVisible(true)
+    this.waveText.setText('Area: Dusty Outskirts')
+
+    this.unlockAreaExit()
+    this.showAreaTitle('DUSTY OUTSKIRTS', 'Road to town remains open')
+  }
+
+  private showAreaTitle(title: string, subtitle: string) {
+    this.clearAreaTitle()
+    this.clearLevelCompleteText()
+
+    const titleText = this.add.text(GAME_WIDTH / 2, 104, title, {
+      fontFamily: 'monospace',
+      fontSize: '32px',
+      color: '#ffe6a7',
+      stroke: '#2b1d16',
+      strokeThickness: 6,
+    }).setOrigin(0.5).setDepth(12)
+
+    const subtitleText = this.add.text(GAME_WIDTH / 2, 144, subtitle, {
+      fontFamily: 'monospace',
+      fontSize: '16px',
+      color: '#f5c16c',
+      stroke: '#2b1d16',
+      strokeThickness: 4,
+    }).setOrigin(0.5).setDepth(12)
+
+    this.areaTitleObjects = [titleText, subtitleText]
+
+    this.tweens.add({
+      targets: this.areaTitleObjects,
+      alpha: 0,
+      delay: 1500,
+      duration: 600,
+      ease: 'Sine.easeInOut',
+      onComplete: () => {
+        this.clearAreaTitle()
+      },
+    })
   }
 
   private addScore(basePoints: number, x: number, y: number) {
-    const isCritical = Math.random() < 0.05  //概率暴击
+    const isCritical = Math.random() < 0.05
     const finalPoints = isCritical ? 15 : basePoints
 
     this.score += finalPoints
@@ -1106,6 +1619,40 @@ class MainScene extends Phaser.Scene {
       onComplete: () => {
         popup.destroy()
       },
+    })
+  }
+
+  private registerEnemyDefeat(x: number, y: number) {
+    if (this.currentArea !== 'dustyOutskirts') return
+    if (this.levelOneCoinsDropped >= this.levelOneCoinDropTarget) return
+
+    this.levelOneEnemyDefeats += 1
+
+    const nextDropDefeat = this.levelOneCoinDropDefeatTargets[this.levelOneCoinsDropped]
+    if (nextDropDefeat === undefined) return
+    if (this.levelOneEnemyDefeats < nextDropDefeat) return
+
+    this.levelOneCoinsDropped += 1
+    this.spawnCoin(x, y)
+  }
+
+  private spawnCoin(x: number, y: number) {
+    const coinX = Phaser.Math.Clamp(x + Phaser.Math.Between(-12, 12), 48, GAME_WIDTH - 48)
+    const coinY = Phaser.Math.Clamp(y + Phaser.Math.Between(-12, 12), 48, GAME_HEIGHT - 48)
+
+    const coin = this.physics.add.sprite(coinX, coinY, 'coin')
+    coin.setDepth(3)
+    coin.setScale(0.95)
+    coin.setData('amount', 1)
+    this.coinPickups.add(coin)
+
+    this.tweens.add({
+      targets: coin,
+      y: coinY - 5,
+      duration: 620,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
     })
   }
 
@@ -1171,8 +1718,6 @@ class MainScene extends Phaser.Scene {
       }
     })
   }
-
-
 }
 
 const config: Phaser.Types.Core.GameConfig = {
