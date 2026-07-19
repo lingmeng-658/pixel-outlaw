@@ -54,13 +54,21 @@
 
 * [ ] 优化标题界面
 * [ ] 优化像素风 UI
-* [ ] 准备 GitHub 仓库
-* [ ] 部署到 Vercel
+* [x] 准备 GitHub 仓库
+* [ ] ~~部署到 Vercel~~（账号验证卡住，暂不使用）
+* [x] 部署到 GitHub Pages
+* [x] 添加 GitHub Pages 自动部署工作流
 * [ ] 发给朋友试玩
+
+当前线上试玩地址：
+
+```txt
+https://lingmeng-658.github.io/pixel-outlaw/
+```
 
 ## 文档和收尾习惯
 
 - [x] 每轮收尾检查 `PROJECT_CONTEXT.md`
 - [x] 每轮收尾检查 `TODO.md`
-- [x] 每轮收尾检查 `DEVLOG.md`
-- [ ] 将本地 `DEVLOG.md` push 到 GitHub 仓库
+- [x] 每轮收尾更新本地 `DEVLOG.md`
+- [x] 明确 `DEVLOG.md` 只本地维护，不上传 GitHub
