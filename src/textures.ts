@@ -115,5 +115,18 @@ export function createTextures(scene: Phaser.Scene) {
   g.generateTexture('hpHeartEmpty', 22, 22)
   g.clear()
 
+  g.fillStyle(0x8b5a2b)
+  g.fillCircle(12, 12, 10)
+  g.fillStyle(0xffd166)
+  g.fillCircle(12, 12, 8)
+  g.fillStyle(0xfff0a3)
+  g.fillCircle(9, 8, 2)
+  g.lineStyle(2, 0x6b3f18, 0.9)
+  g.strokeCircle(12, 12, 7)
+  g.fillStyle(0xb97924)
+  g.fillRect(11, 7, 2, 10)
+  g.generateTexture('coin', 24, 24)
+  g.clear()
+
   g.destroy()
 }
