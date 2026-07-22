@@ -48,6 +48,27 @@ https://lingmeng-658.github.io/pixel-outlaw/
 
 当前重构原则：先保持玩法稳定，只把边界清晰、低风险的代码拆出去，不一次性大拆 UI、战斗和关卡控制。
 
+## ChatGPT / Codex 协作闭环
+
+Pixel Outlaw 的默认开发流程如下：
+
+1. 用户与 ChatGPT 先讨论玩法、需求边界、暂不实现的内容和验收标准；讨论阶段不直接修改游戏源码。
+2. 设计确认后，ChatGPT 读取 GitHub 当前代码、历史提交与项目文档，把完整实现任务写入仓库中的 `docs/NEXT_TASK.md`；重要长期设计同时同步到本文件。
+3. ChatGPT 只向用户提供一条简短的 Codex 启动指令。详细需求以仓库中的 `AGENTS.md`、`PROJECT_CONTEXT.md`、`docs/AI_HANDOFF.md` 和 `docs/NEXT_TASK.md` 为准，不在聊天中重复维护另一份长提示词。
+4. Codex 根据仓库当前代码、Git 历史、可用 skills 和任务文档实施修改，运行 `npm run build`、`git diff`、`git status`，并更新 `docs/AI_HANDOFF.md`。功能开发和重构应分开处理。
+5. Codex 完成且改动可从 GitHub 读取后，用户告诉 ChatGPT“改好了”。ChatGPT 必须重新读取实际提交、diff 和修改后的源码，不只依赖 Codex 的文字汇报，然后说明实际实现的功能、遗漏、风险和重点试玩项。
+6. 用户运行 `npm run dev` 做真实试玩。发现 bug 时，ChatGPT 分析当前代码，把最小修复任务重新写入 `docs/NEXT_TASK.md`，再交给 Codex 修改，不在修 bug 时顺手扩大范围。
+7. 没有 bug 或修复验收完成后，进入代码回顾：重点理解新功能入口、核心状态、主流程、关键接口、回调关系和后续扩展点，而不是逐行背诵全部代码。
+8. 只有用户明确要求 ChatGPT 直接修改源码时，ChatGPT 才越过上述流程；默认情况下，ChatGPT 的 GitHub 写操作主要用于任务文档、项目上下文和交接文档，游戏源码由 Codex 实施。
+
+协作中的真相来源：
+
+- GitHub 当前源码和提交历史是代码真相。
+- `PROJECT_CONTEXT.md` 是长期设计与协作流程真相。
+- `docs/NEXT_TASK.md` 是当前已确认、等待 Codex 执行的正式任务。
+- `docs/AI_HANDOFF.md` 是实现后的状态、验证结果、风险和试玩交接板。
+- 聊天记录用于讨论过程，不替代仓库中的正式任务与设计文档。
+
 ## 当前核心玩法
 
 - 标题页 Start Game
@@ -138,6 +159,8 @@ pixel-outlaw-save
 每轮开发或重构结束后，同步检查并更新：
 
 - `PROJECT_CONTEXT.md`：记录当前项目真实状态、设计决策、代码结构变化；以 GitHub 仓库里的版本为准，可以由助手直接更新。
+- `docs/NEXT_TASK.md`：记录 ChatGPT 与用户已确认、等待 Codex 执行的正式任务；下一轮任务开始前应替换旧任务，避免 Codex继续执行已完成内容。
+- `docs/AI_HANDOFF.md`：记录 Codex 实际修改、build 结果、风险、试玩清单和提交状态。
 - `TODO.md`：记录下一步任务、优先级、暂不处理的内容；优先由助手给出本地修改方案，用户确认后本地提交并 push；必要时也可以由助手直接在 GitHub 收尾。
 - `DEVLOG.md`：本地开发日志，只在用户本地维护，不上传 GitHub；助手可以给出追加内容，但不把它作为仓库文件处理。
 
