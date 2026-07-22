@@ -14,13 +14,13 @@ export type PlannedPickup = {
 
 export const LEVEL_TWO_CONFIG = {
   batches: [
-    { chasers: 12, chargers: 1, gunslingers: 0, aliveCap: 10 },
-    { chasers: 14, chargers: 1, gunslingers: 1, aliveCap: 12 },
-    { chasers: 14, chargers: 2, gunslingers: 1, aliveCap: 14 },
-    { chasers: 12, chargers: 1, gunslingers: 0, aliveCap: 16 },
-    { chasers: 16, chargers: 1, gunslingers: 2, aliveCap: 18 },
+    { chasers: 12, chargers: 0, gunslingers: 0, aliveCap: 10 },
+    { chasers: 14, chargers: 1, gunslingers: 0, aliveCap: 12 },
+    { chasers: 14, chargers: 1, gunslingers: 1, aliveCap: 14 },
+    { chasers: 12, chargers: 2, gunslingers: 1, aliveCap: 16 },
+    { chasers: 16, chargers: 2, gunslingers: 2, aliveCap: 18 },
   ] satisfies LevelTwoBatch[],
-  spawnInterval: 520,
+  spawnInterval: 600,
   nextBatchDelay: 2500,
   nextBatchDefeatRatio: 0.65,
   enemy: {

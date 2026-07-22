@@ -121,6 +121,8 @@ class MainScene extends Phaser.Scene {
   private mercyArmed = false
   private levelTwoShieldSpawned = false
   private finalGunslingersSpawned = 0
+  private chargerIntroducedThisRun = false
+  private gunslingerIntroducedThisRun = false
   private townCheckpoint = { score: 0, health: MAX_HEALTH, coins: 0, maxHealth: MAX_HEALTH }
 
   constructor() {
@@ -349,8 +351,7 @@ class MainScene extends Phaser.Scene {
       const coin = coinObject as Phaser.Physics.Arcade.Sprite
       const amount = coin.getData('amount') as number | undefined
 
-      this.tweens.killTweensOf(coin)
-      coin.destroy()
+      this.destroyCoinPickup(coin)
       this.coinCount += amount ?? 1
       this.updateCoinDisplay()
       this.pulseCoinUi()
@@ -481,6 +482,8 @@ class MainScene extends Phaser.Scene {
     this.mercyArmed = false
     this.levelTwoShieldSpawned = false
     this.finalGunslingersSpawned = 0
+    this.chargerIntroducedThisRun = false
+    this.gunslingerIntroducedThisRun = false
     this.townCheckpoint = { score: 0, health: MAX_HEALTH, coins: 0, maxHealth: MAX_HEALTH }
   }
 
@@ -914,7 +917,7 @@ class MainScene extends Phaser.Scene {
     this.clearShield()
     this.levelTwoEncounter.stop()
 
-    this.enemies.clear(true, true)
+    this.clearEnemies()
     this.bullets.clear(true, true)
     this.enemyBullets.clear(true, true)
     this.clearItems()
@@ -1399,9 +1402,82 @@ class MainScene extends Phaser.Scene {
 
   private clearCoinPickups() {
     this.coinPickups.getChildren().forEach((child) => {
-      this.tweens.killTweensOf(child)
-      child.destroy()
+      this.destroyCoinPickup(child as Phaser.Physics.Arcade.Sprite)
     })
+  }
+
+  private destroyCoinPickup(coin: Phaser.Physics.Arcade.Sprite) {
+    if (!coin.active) return
+    const warningTimer = coin.getData('warningTimer') as Phaser.Time.TimerEvent | undefined
+    const expiryTimer = coin.getData('expiryTimer') as Phaser.Time.TimerEvent | undefined
+    warningTimer?.remove(false)
+    expiryTimer?.remove(false)
+    this.tweens.killTweensOf(coin)
+    coin.destroy()
+  }
+
+  private clearEnemies() {
+    this.enemies.getChildren().forEach((child) => {
+      this.destroyEnemyVisuals(child as Phaser.Physics.Arcade.Sprite)
+    })
+    this.enemies.clear(true, true)
+  }
+
+  private destroyEnemyVisuals(enemy: Phaser.Physics.Arcade.Sprite) {
+    const keys = ['warning', 'explosionWarning', 'contenderMarker', 'upgradeMarker', 'aimCue'] as const
+    keys.forEach((key) => {
+      const object = enemy.getData(key) as Phaser.GameObjects.GameObject | undefined
+      if (object?.active) {
+        this.tweens.killTweensOf(object)
+        object.destroy()
+      }
+      enemy.setData(key, undefined)
+    })
+    const healthPips = enemy.getData('healthPips') as Phaser.GameObjects.Rectangle[] | undefined
+    healthPips?.forEach((pip) => pip.destroy())
+    enemy.setData('healthPips', undefined)
+    const introVisuals = enemy.getData('introVisuals') as Phaser.GameObjects.GameObject[] | undefined
+    introVisuals?.forEach((object) => {
+      this.tweens.killTweensOf(object)
+      object.destroy()
+    })
+    enemy.setData('introVisuals', undefined)
+  }
+
+  private createEnemyHealthPips(enemy: Phaser.Physics.Arcade.Sprite) {
+    const existing = enemy.getData('healthPips') as Phaser.GameObjects.Rectangle[] | undefined
+    existing?.forEach((pip) => pip.destroy())
+    const pips = [-5, 5].map((offset) => this.add.rectangle(enemy.x + offset, enemy.y - 27, 7, 4, 0xffd166)
+      .setStrokeStyle(1, 0x2b1d16).setDepth(11))
+    enemy.setData('healthPips', pips)
+    this.updateEnemyIndicators(enemy)
+  }
+
+  private updateEnemyIndicators(enemy: Phaser.Physics.Arcade.Sprite) {
+    const health = (enemy.getData('health') as number | undefined) ?? 1
+    const pips = enemy.getData('healthPips') as Phaser.GameObjects.Rectangle[] | undefined
+    pips?.forEach((pip, index) => {
+      pip.setPosition(enemy.x + (index === 0 ? -5 : 5), enemy.y - 27)
+      pip.setFillStyle(index < health ? 0xffd166 : 0x4b4038, index < health ? 1 : 0.7)
+    })
+    const marker = enemy.getData('upgradeMarker') as Phaser.GameObjects.Text | undefined
+    marker?.setPosition(enemy.x, enemy.y + 26)
+  }
+
+  private setEnemyUpgradeMarker(enemy: Phaser.Physics.Arcade.Sprite, type: ContestedPickupType) {
+    const existing = enemy.getData('upgradeMarker') as Phaser.GameObjects.Text | undefined
+    existing?.destroy()
+    const visual = {
+      coffee: { text: '»', color: '#ffc35a' },
+      dynamite: { text: '◆', color: '#ff624d' },
+      ammo: { text: '▥', color: '#78b7ff' },
+      buckshot: { text: '•••', color: '#ffd166' },
+    }[type]
+    const marker = this.add.text(enemy.x, enemy.y + 26, visual.text, {
+      fontFamily: 'monospace', fontSize: '14px', color: visual.color,
+      stroke: '#1e1611', strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(10)
+    enemy.setData('upgradeMarker', marker)
   }
 
   private handlePlayerMove() {
@@ -1534,6 +1610,7 @@ class MainScene extends Phaser.Scene {
           const health = (enemy.getData('health') as number | undefined) ?? 1
           if (health > 1) {
             enemy.setData('health', health - 1)
+            this.updateEnemyIndicators(enemy)
             enemy.setTint(0xffffff)
             this.time.delayedCall(70, () => enemy.active && enemy.clearTint())
           } else {
@@ -1555,12 +1632,7 @@ class MainScene extends Phaser.Scene {
     const x = enemy.x
     const y = enemy.y
     const batchIndex = enemy.getData('batchIndex') as number | undefined
-    const warning = enemy.getData('warning') as Phaser.GameObjects.GameObject | undefined
-    const explosionWarning = enemy.getData('explosionWarning') as Phaser.GameObjects.GameObject | undefined
-    const contenderMarker = enemy.getData('contenderMarker') as Phaser.GameObjects.GameObject | undefined
-    warning?.destroy()
-    explosionWarning?.destroy()
-    contenderMarker?.destroy()
+    this.destroyEnemyVisuals(enemy)
     enemy.destroy()
 
     if (awardKill) {
@@ -1589,7 +1661,10 @@ class MainScene extends Phaser.Scene {
         if (enemy.getData('explosive')) this.armExplosiveEnemy(enemy, LEVEL_TWO_CONFIG.explosion.warningMs)
         else this.defeatEnemy(enemy, true)
       }
-      else enemy.setData('health', health - LEVEL_TWO_CONFIG.playerBuffs.dynamiteDamage)
+      else {
+        enemy.setData('health', health - LEVEL_TWO_CONFIG.playerBuffs.dynamiteDamage)
+        this.updateEnemyIndicators(enemy)
+      }
     })
     if (damagesPlayer && Phaser.Math.Distance.Between(x, y, this.player.x, this.player.y) <= radius) {
       this.damagePlayer(this.time.now)
@@ -1709,7 +1784,7 @@ class MainScene extends Phaser.Scene {
       this.prepareSceneChangeFromPause()
     }
 
-    this.enemies.clear(true, true)
+    this.clearEnemies()
     this.bullets.clear(true, true)
     this.enemyBullets.clear(true, true)
     this.clearItems()
@@ -1845,7 +1920,7 @@ class MainScene extends Phaser.Scene {
     this.currentWaveItem = null
     this.itemSpawnedThisWave = false
 
-    this.enemies.clear(true, true)
+    this.clearEnemies()
     this.bullets.clear(true, true)
     this.enemyBullets.clear(true, true)
     this.clearItems()
@@ -1880,7 +1955,7 @@ class MainScene extends Phaser.Scene {
     this.currentWaveItem = null
     this.itemSpawnedThisWave = false
 
-    this.enemies.clear(true, true)
+    this.clearEnemies()
     this.bullets.clear(true, true)
     this.enemyBullets.clear(true, true)
     this.clearItems()
@@ -1909,6 +1984,8 @@ class MainScene extends Phaser.Scene {
     this.clearContestedPickupState()
     this.levelTwoShieldSpawned = false
     this.finalGunslingersSpawned = 0
+    this.chargerIntroducedThisRun = false
+    this.gunslingerIntroducedThisRun = false
     this.adaptiveSecondBusy = false
     this.weaponMode = null
     this.weaponModeUntil = 0
@@ -2018,6 +2095,25 @@ class MainScene extends Phaser.Scene {
       repeat: -1,
       ease: 'Sine.easeInOut',
     })
+
+    const warningTimer = this.time.delayedCall(TIMING.coinLifetime - TIMING.coinExpiryWarning, () => {
+      if (!coin.active) return
+      this.tweens.killTweensOf(coin)
+      coin.setY(coinY)
+      this.tweens.add({
+        targets: coin,
+        alpha: 0.28,
+        duration: 180,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+      })
+    })
+    const expiryTimer = this.time.delayedCall(TIMING.coinLifetime, () => {
+      if (coin.active) this.destroyCoinPickup(coin)
+    })
+    coin.setData('warningTimer', warningTimer)
+    coin.setData('expiryTimer', expiryTimer)
   }
 
   private spawnEnemies(time: number) {
@@ -2060,6 +2156,7 @@ class MainScene extends Phaser.Scene {
     this.enemies.getChildren().forEach((child) => {
       const enemy = child as Phaser.Physics.Arcade.Sprite
       if (!enemy.active) return
+      this.updateEnemyIndicators(enemy)
       if (enemy.getData('dying')) {
         enemy.setVelocity(0, 0)
         return
@@ -2124,6 +2221,7 @@ class MainScene extends Phaser.Scene {
         enemy.setData('stateUntil', time + config.chargeMs)
         const multiplier = enemy.getData('coffeeBoosted') ? config.coffeeSpeedMultiplier : 1
         enemy.setVelocity(dx * config.chargeSpeed * multiplier, dy * config.chargeSpeed * multiplier)
+        enemy.clearTint()
       }
       return
     }
@@ -2207,6 +2305,7 @@ class MainScene extends Phaser.Scene {
     enemy.setData('busy', true)
     enemy.setVelocity(0, 0)
     enemy.setTint(0xffd166)
+    this.showGunslingerAimCue(enemy, config.telegraphMs)
     const vx = this.player.body?.velocity.x ?? 0
     const vy = this.player.body?.velocity.y ?? 0
     const targets = [
@@ -2258,6 +2357,7 @@ class MainScene extends Phaser.Scene {
     }
     this.adaptiveSecondBusy = true
     enemy.setTint(0xffffff)
+    this.showGunslingerAimCue(enemy, LEVEL_TWO_CONFIG.enemy.gunslinger.adaptiveRetargetMs)
     this.time.delayedCall(LEVEL_TWO_CONFIG.enemy.gunslinger.adaptiveRetargetMs, () => {
       if (!enemy.active || this.currentArea !== 'townRoad') {
         this.adaptiveSecondBusy = false
@@ -2280,10 +2380,26 @@ class MainScene extends Phaser.Scene {
 
   private finishGunslingerAttack(enemy: Phaser.Physics.Arcade.Sprite, attackStartedAt: number) {
     enemy.clearTint()
-    const upgrade = enemy.getData('upgrade') as GunslingerUpgrade | undefined
-    if (upgrade) enemy.setTint(upgrade === 'ammo' ? 0x78b7ff : 0xffc36b)
     enemy.setData('busy', false)
     enemy.setData('nextAttack', attackStartedAt + LEVEL_TWO_CONFIG.enemy.gunslinger.attackCooldown)
+  }
+
+  private showGunslingerAimCue(enemy: Phaser.Physics.Arcade.Sprite, duration: number) {
+    const existing = enemy.getData('aimCue') as Phaser.GameObjects.Arc | undefined
+    existing?.destroy()
+    const cue = this.add.circle(enemy.x, enemy.y, 19, 0x78b7ff, 0.08)
+      .setStrokeStyle(2, 0x9ed0ff, 0.9).setDepth(4)
+    enemy.setData('aimCue', cue)
+    this.tweens.add({
+      targets: cue,
+      scale: 0.55,
+      alpha: 0.9,
+      duration,
+      onComplete: () => {
+        if (enemy.active && enemy.getData('aimCue') === cue) enemy.setData('aimCue', undefined)
+        cue.destroy()
+      },
+    })
   }
 
   private fireEnemySpread(enemy: Phaser.Physics.Arcade.Sprite, target: { x: number; y: number }, spreadDegrees: number) {
@@ -2383,18 +2499,17 @@ class MainScene extends Phaser.Scene {
     const candidates = this.getEligibleContenders(type)
     if (candidates.length === 0) return
     this.primaryContender = Phaser.Utils.Array.GetRandom(candidates)
-    const marker = this.add.text(this.primaryContender.x, this.primaryContender.y - 28, '!', {
+    const marker = this.add.text(this.primaryContender.x, this.primaryContender.y - 46, '!', {
       fontFamily: 'monospace', fontSize: '24px', color: '#ffdf64', stroke: '#2b1d16', strokeThickness: 4,
     }).setOrigin(0.5).setDepth(10)
     this.primaryContender.setData('contenderMarker', marker)
-    this.primaryContender.setTint(0xffdf64)
   }
 
   private ensurePrimaryContender() {
     if (!this.contestedPickup?.active) return
     if (this.primaryContender?.active) {
       const marker = this.primaryContender.getData('contenderMarker') as Phaser.GameObjects.Text | undefined
-      marker?.setPosition(this.primaryContender.x, this.primaryContender.y - 28)
+      marker?.setPosition(this.primaryContender.x, this.primaryContender.y - 46)
       return
     }
     const type = this.contestedPickup.getData('type') as ContestedPickupType
@@ -2448,7 +2563,6 @@ class MainScene extends Phaser.Scene {
       const marker = this.primaryContender.getData('contenderMarker') as Phaser.GameObjects.Text | undefined
       marker?.destroy()
       this.primaryContender.setData('contenderMarker', undefined)
-      this.primaryContender.clearTint()
     }
     this.primaryContender = undefined
     this.contestedPickup = undefined
@@ -2462,16 +2576,18 @@ class MainScene extends Phaser.Scene {
         enemy.setTexture('charger')
         enemy.setData('health', LEVEL_TWO_CONFIG.enemy.charger.health)
         enemy.setData('state', 'track')
+        enemy.body?.setSize(28, 28, true)
+        this.createEnemyHealthPips(enemy)
       } else {
         enemy.setData('coffeeBoosted', true)
       }
-      enemy.setTint(0xf5c16c)
+      this.setEnemyUpgradeMarker(enemy, type)
     } else if (type === 'dynamite') {
       enemy.setData('explosive', true)
-      enemy.setTint(0xff704d)
+      this.setEnemyUpgradeMarker(enemy, type)
     } else if (kind === 'gunslinger') {
       enemy.setData('upgrade', type)
-      enemy.setTint(type === 'ammo' ? 0x78b7ff : 0xffc36b)
+      this.setEnemyUpgradeMarker(enemy, type)
     }
     this.showFloatingText(enemy.x, enemy.y - 30, 'ENEMY POWER UP')
   }
@@ -2484,6 +2600,7 @@ class MainScene extends Phaser.Scene {
     const x = side === 1 ? GAME_WIDTH - 40 : side === 3 ? 40 : Phaser.Math.Between(40, GAME_WIDTH - 40)
     const y = side === 0 ? 40 : side === 2 ? GAME_HEIGHT - 40 : Phaser.Math.Between(40, GAME_HEIGHT - 40)
     const enemy = this.physics.add.sprite(x, y, kind === 'chaser' ? 'enemy' : kind)
+    if (kind !== 'chaser') enemy.body?.setSize(28, 28, true)
     const [minSpeed, maxSpeed] = LEVEL_TWO_CONFIG.enemy.chaser.speed
 
     enemy.setData('kind', kind)
@@ -2497,6 +2614,35 @@ class MainScene extends Phaser.Scene {
       enemy.setData('nextAttack', this.time.now + LEVEL_TWO_CONFIG.enemy.gunslinger.finalAttackOffset[offsetIndex])
     }
     this.enemies.add(enemy)
+    if (kind !== 'chaser') this.createEnemyHealthPips(enemy)
+    this.showSpecialEnemyIntroduction(enemy, kind)
+  }
+
+  private showSpecialEnemyIntroduction(enemy: Phaser.Physics.Arcade.Sprite, kind: EnemyKind) {
+    if (kind === 'chaser') return
+    const alreadyIntroduced = kind === 'charger' ? this.chargerIntroducedThisRun : this.gunslingerIntroducedThisRun
+    if (alreadyIntroduced) return
+    if (kind === 'charger') this.chargerIntroducedThisRun = true
+    else this.gunslingerIntroducedThisRun = true
+
+    const color = kind === 'charger' ? 0xffa24a : 0x78b7ff
+    const label = this.add.text(enemy.x, enemy.y - 42, kind === 'charger' ? 'CHARGER' : 'GUNSLINGER', {
+      fontFamily: 'monospace', fontSize: '16px', color: kind === 'charger' ? '#ffb45e' : '#8cc7ff',
+      stroke: '#1e1611', strokeThickness: 4,
+    }).setOrigin(0.5).setDepth(14)
+    const effect = kind === 'charger'
+      ? this.add.triangle(enemy.x, enemy.y, 0, 16, 34, 0, 34, 32, color, 0.18).setStrokeStyle(2, color, 0.9)
+      : this.add.circle(enemy.x, enemy.y, 27, color, 0.12).setStrokeStyle(2, color, 0.9)
+    effect.setDepth(4)
+    enemy.setData('introVisuals', [label, effect])
+    const forgetVisual = (object: Phaser.GameObjects.GameObject) => {
+      object.destroy()
+      if (!enemy.active) return
+      const visuals = enemy.getData('introVisuals') as Phaser.GameObjects.GameObject[] | undefined
+      enemy.setData('introVisuals', visuals?.filter((visual) => visual !== object))
+    }
+    this.tweens.add({ targets: effect, scale: 1.45, alpha: 0, duration: 400, onComplete: () => forgetVisual(effect) })
+    this.tweens.add({ targets: label, y: label.y - 12, alpha: 0, delay: 650, duration: 350, onComplete: () => forgetVisual(label) })
   }
 
   private cleanBullets() {

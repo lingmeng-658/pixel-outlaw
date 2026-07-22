@@ -19,4 +19,6 @@ export const TIMING = {
   waveTransitionDelay: 750,
   heartPickupDelay: 700,
   pickupDelay: 1800,
+  coinLifetime: 12000,
+  coinExpiryWarning: 2500,
 } as const
