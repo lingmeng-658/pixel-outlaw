@@ -36,11 +36,13 @@ https://lingmeng-658.github.io/pixel-outlaw/
 
 当前项目仍然以单个 Phaser 主场景为核心，但已经把部分稳定模块从 `main.ts` 中拆出。
 
-- `src/main.ts`：主场景 MainScene，负责游戏流程、玩家、敌人、子弹、道具、暂停、第一关波次推进。
+- `src/main.ts`：主场景 MainScene，负责游戏流程、玩家、敌人、子弹、道具、暂停和两关接线。
 - `src/constants.ts`：游戏尺寸、玩家速度、子弹速度、冷却时间、道具持续时间等基础数值。
 - `src/levelOne.ts`：第一关各阶段敌人数量配置。
-- `src/types.ts`：道具类型、第一关存档阶段类型。
-- `src/save.ts`：存档 key、第一关存档数据结构、创建第一关存档数据的方法。
+- `src/levelTwo.ts`：第二关隐藏批次、敌人、强化、掉落与奖励配置。
+- `src/encounter.ts`：第二关连续遭遇调度器，负责批次激活、动态上限、待生成队列和完成判定。
+- `src/types.ts`：道具、敌人、区域和存档阶段类型。
+- `src/save.ts`：version 3 存档结构、运行时校验及 version 1 / 2 迁移。
 - `src/textures.ts`：临时像素纹理创建逻辑。
 - `src/style.css`：页面居中、背景、canvas 像素渲染和边框样式。
 - `vite.config.ts`：Vite 配置，当前主要用于 GitHub Pages 子路径部署。
@@ -97,6 +99,14 @@ Pixel Outlaw 的默认开发流程如下：
 
 内部波次不显示大号 WAVE CLEAR，以免打断爽感。阶段之间通过短暂停顿和道具出现自然过渡。
 
+## 当前第二关设计
+
+Town Road 已接入第二关第一版代码，主题是“持续增压战斗 + 新敌人行为 + 可争夺强化道具”。底层使用 5 个隐藏批次、时间或击杀比例接续、动态存活上限和待生成队列，不显示明确 Wave UI。
+
+第二关包含普通追踪者、直线锁向冲锋者和保持距离射击的枪手。Coffee / Dynamite 由近战敌人争夺，Ammo / Buckshot 由枪手争夺；玩家可获得加速、射速、扇形弹和命中爆破强化。回复采用概率与双冷却并提供 1 HP 保底，金币独立掉落，最终阶段前规划一个玩家专属 Shield。
+
+第二关首次完成会增加 1 点最大生命和当前生命。该流程已通过构建检查，实际战斗节奏、弹幕可读性和争夺手感仍等待用户浏览器试玩验收。
+
 ## 已实现道具
 
 ### Coffee
@@ -131,7 +141,7 @@ Pixel Outlaw 的默认开发流程如下：
 - R Restart Level
 - S Save Progress & Quit
 
-存档采用关卡级检查点恢复：第一关未通关时，Continue 从 Dusty Outskirts 关卡开头重新开始；已通关时恢复 Dusty Outskirts 出口或 Town Road 区域。不会保存或恢复中途波次、战场对象、玩家精确位置或限时道具剩余时间。
+存档采用关卡级检查点恢复：第一关未通关时，Continue 从 Dusty Outskirts 关卡开头重新开始；Town Road 未通关时从第二关入口重新开始；第二关完成后恢复完成状态和最大生命奖励。不会保存或恢复中途批次、战场对象、玩家精确位置或限时道具剩余时间。当前存档版本为 version 3，合法 version 1 / 2 存档会保守迁移。
 
 localStorage key：
 

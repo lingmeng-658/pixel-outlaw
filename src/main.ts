@@ -9,14 +9,17 @@ import {
   TIMING,
 } from './constants'
 import { LEVEL_ONE_CONFIG } from './levelOne'
+import { ContinuousEncounter } from './encounter'
+import { LEVEL_TWO_CONFIG, LEVEL_TWO_TOTAL_ENEMIES } from './levelTwo'
 import { createLevelOneSaveData, loadLevelOneSaveData, SAVE_KEY } from './save'
 import { createTextures } from './textures'
 import type { LevelOneSaveData } from './save'
-import type { AreaId, PickupType } from './types'
+import type { AreaId, ContestedPickupType, EnemyKind, GunslingerUpgrade, PickupType } from './types'
 
 class MainScene extends Phaser.Scene {
   private player!: Phaser.Physics.Arcade.Sprite
   private bullets!: Phaser.Physics.Arcade.Group
+  private enemyBullets!: Phaser.Physics.Arcade.Group
   private enemies!: Phaser.Physics.Arcade.Group
   private items!: Phaser.Physics.Arcade.Group
   private coinPickups!: Phaser.Physics.Arcade.Group
@@ -93,12 +96,38 @@ class MainScene extends Phaser.Scene {
   private areaTitleObjects: Phaser.GameObjects.GameObject[] = []
   private levelCompleteText?: Phaser.GameObjects.Text
   private savedGame: LevelOneSaveData | null = null
+  private levelTwoEncounter = new ContinuousEncounter(
+    LEVEL_TWO_CONFIG.batches,
+    LEVEL_TWO_CONFIG.spawnInterval,
+    LEVEL_TWO_CONFIG.nextBatchDelay,
+    LEVEL_TWO_CONFIG.nextBatchDefeatRatio,
+  )
+  private levelTwoCompleted = false
+  private levelTwoDefeats = 0
+  private nextLevelTwoPickup = 0
+  private pendingContestedPickup = false
+  private contestedPickup?: Phaser.Physics.Arcade.Sprite
+  private primaryContender?: Phaser.Physics.Arcade.Sprite
+  private contenderEnabledAt = 0
+  private weaponMode: GunslingerUpgrade | null = null
+  private weaponModeUntil = 0
+  private dynamiteCharges = 0
+  private shotActionId = 0
+  private explosiveActions = new Set<number>()
+  private adaptiveSecondBusy = false
+  private heartDropReadyAt = 0
+  private heartDropKillsRemaining = 0
+  private mercyDropAttempts = 0
+  private mercyArmed = false
+  private levelTwoShieldSpawned = false
+  private finalGunslingersSpawned = 0
+  private townCheckpoint = { score: 0, health: MAX_HEALTH, coins: 0, maxHealth: MAX_HEALTH }
 
   constructor() {
     super('MainScene')
   }
 
-  create(data?: { autoStart?: boolean }) {
+  create(data?: { autoStart?: boolean; townCheckpoint?: { score: number; health: number; coins: number; maxHealth: number } }) {
     this.resetGameState()
     this.savedGame = loadLevelOneSaveData()
     createTextures(this)
@@ -114,6 +143,7 @@ class MainScene extends Phaser.Scene {
     this.player.setVisible(false)
 
     this.bullets = this.physics.add.group()
+    this.enemyBullets = this.physics.add.group()
     this.enemies = this.physics.add.group()
     this.items = this.physics.add.group()
     this.coinPickups = this.physics.add.group()
@@ -279,6 +309,7 @@ class MainScene extends Phaser.Scene {
 
       const now = this.time.now
       const enemy = enemyObject as Phaser.Physics.Arcade.Sprite
+      if (enemy.getData('dying')) return
 
       if (this.shieldCharges > 0) {
         const enemyX = enemy.x
@@ -286,53 +317,30 @@ class MainScene extends Phaser.Scene {
 
         this.clearShield()
 
-        enemy.destroy()
+        this.defeatEnemy(enemy, this.currentArea === 'townRoad')
         this.cameras.main.shake(80, 0.004)
         this.showBlockFlash()
         this.showFloatingText(enemyX, enemyY - 20, 'BLOCK')
 
-        this.enemiesCleared += 1
-        this.checkWaveProgress()
         return
       }
 
       if (now - this.lastDamageTime < TIMING.damageCooldown) return
 
-      this.lastDamageTime = now
-      this.hasTakenDamage = true
-      this.health -= 1
-      this.updateHealthDisplay()
-
-      enemy.destroy()
-
-      this.cameras.main.shake(120, 0.008)
-
-      if (this.health <= 0) {
-        this.endGame()
+      if (enemy.getData('explosive')) {
+        this.armExplosiveEnemy(enemy, LEVEL_TWO_CONFIG.explosion.warningMs)
+        this.damagePlayer(now)
         return
       }
-
-      this.enemiesCleared += 1
-      this.checkWaveProgress()
+      this.defeatEnemy(enemy, this.currentArea === 'townRoad')
+      this.damagePlayer(now)
     })
 
     this.physics.add.overlap(this.player, this.items, (_playerObject, itemObject) => {
       if (!this.isStarted || this.isGameOver || this.isAreaTransitioning) return
 
       const item = itemObject as Phaser.Physics.Arcade.Sprite
-      const itemType = item.getData('type') as string
-      const glow = item.getData('glow') as Phaser.GameObjects.Image | undefined
-
-      glow?.destroy()
-      item.destroy()
-
-      if (itemType === 'coffee') {
-        this.activateSpeedBoost(this.time.now)
-      } else if (itemType === 'heart') {
-        this.activateHeal()
-      } else if (itemType === 'shield') {
-        this.activateShield(this.time.now)
-      }
+      this.collectPlayerPickup(item)
     })
 
     this.physics.add.overlap(this.player, this.coinPickups, (_playerObject, coinObject) => {
@@ -349,8 +357,26 @@ class MainScene extends Phaser.Scene {
       this.showFloatingText(this.player.x, this.player.y - 34, '+1 GOLD')
     })
 
+    this.physics.add.overlap(this.player, this.enemyBullets, (_playerObject, bulletObject) => {
+      if (!this.isStarted || this.isGameOver || this.isAreaTransitioning) return
+      const bullet = bulletObject as Phaser.Physics.Arcade.Image
+      bullet.destroy()
+      this.damagePlayer(this.time.now)
+    })
+
     if (data?.autoStart) {
       this.startGame()
+      if (data.townCheckpoint) {
+        this.score = data.townCheckpoint.score
+        this.health = data.townCheckpoint.health
+        this.coinCount = data.townCheckpoint.coins
+        this.maxHealth = data.townCheckpoint.maxHealth
+        this.restoreCompletedLevelOneState()
+        this.scoreText.setText(`Score: ${this.score}`)
+        this.updateCoinDisplay()
+        this.rebuildHealthDisplay()
+        this.enterTownRoad()
+      }
     }
   }
 
@@ -381,6 +407,7 @@ class MainScene extends Phaser.Scene {
 
     if (this.currentArea === 'townRoad') {
       this.handleTownRoadInput()
+      this.updateLevelTwo(time)
     }
 
     if (this.currentArea === 'dustyOutskirts') {
@@ -392,12 +419,16 @@ class MainScene extends Phaser.Scene {
     this.handlePlayerMove()
     this.handleShooting(time)
     this.moveBullets(delta)
+    this.moveEnemyBullets(delta)
 
     if (this.currentArea === 'dustyOutskirts') {
       this.spawnEnemies(time)
       this.moveEnemies()
       this.checkBulletEnemyHits()
       this.checkAreaExit()
+    } else {
+      this.moveEnemies()
+      this.checkBulletEnemyHits()
     }
 
     this.cleanBullets()
@@ -430,6 +461,27 @@ class MainScene extends Phaser.Scene {
     this.tweens.killTweensOf(this.levelCompleteText)
     this.levelCompleteText.destroy()
     this.levelCompleteText = undefined
+    this.levelTwoEncounter.reset()
+    this.levelTwoCompleted = false
+    this.levelTwoDefeats = 0
+    this.nextLevelTwoPickup = 0
+    this.pendingContestedPickup = false
+    this.contestedPickup = undefined
+    this.primaryContender = undefined
+    this.contenderEnabledAt = 0
+    this.weaponMode = null
+    this.weaponModeUntil = 0
+    this.dynamiteCharges = 0
+    this.shotActionId = 0
+    this.explosiveActions.clear()
+    this.adaptiveSecondBusy = false
+    this.heartDropReadyAt = 0
+    this.heartDropKillsRemaining = 0
+    this.mercyDropAttempts = 0
+    this.mercyArmed = false
+    this.levelTwoShieldSpawned = false
+    this.finalGunslingersSpawned = 0
+    this.townCheckpoint = { score: 0, health: MAX_HEALTH, coins: 0, maxHealth: MAX_HEALTH }
   }
 
   private drawDustyOutskirtsBackground() {
@@ -626,11 +678,6 @@ class MainScene extends Phaser.Scene {
   }
 
   private handleTownRoadInput() {
-    if (Phaser.Input.Keyboard.JustDown(this.keys.R)) {
-      this.scene.restart({ autoStart: true })
-      return
-    }
-
     this.checkTownRoadReturnExit()
   }
 
@@ -724,7 +771,11 @@ class MainScene extends Phaser.Scene {
 
   private restartCurrentLevel() {
     this.prepareSceneChangeFromPause()
-    this.scene.restart({ autoStart: true })
+    if (this.currentArea === 'townRoad') {
+      this.scene.restart({ autoStart: true, townCheckpoint: this.townCheckpoint })
+    } else {
+      this.scene.restart({ autoStart: true })
+    }
   }
 
   private saveAndQuit() {
@@ -732,9 +783,11 @@ class MainScene extends Phaser.Scene {
     const saveData = createLevelOneSaveData({
       area: isCompletedSave ? this.currentArea : 'dustyOutskirts',
       levelCompleted: isCompletedSave,
+      levelTwoCompleted: isCompletedSave && this.levelTwoCompleted,
       stage: isCompletedSave ? 'clear' : 'intro',
       score: isCompletedSave ? this.score : 0,
       health: isCompletedSave ? this.health : MAX_HEALTH,
+      maxHealth: isCompletedSave ? this.maxHealth : MAX_HEALTH,
       coins: isCompletedSave ? this.coinCount : 0,
       heartIntroduced: false,
       coinProgress: isCompletedSave
@@ -765,7 +818,8 @@ class MainScene extends Phaser.Scene {
 
   private handleRestartInput() {
     if (Phaser.Input.Keyboard.JustDown(this.keys.R)) {
-      this.scene.restart()
+      if (this.currentArea === 'townRoad') this.scene.restart({ autoStart: true, townCheckpoint: this.townCheckpoint })
+      else this.scene.restart()
     }
   }
 
@@ -807,8 +861,10 @@ class MainScene extends Phaser.Scene {
 
     this.score = saveData.score
     this.health = saveData.health
+    this.maxHealth = saveData.maxHealth
     this.coinCount = saveData.coins
     this.levelCompleted = saveData.levelCompleted
+    this.levelTwoCompleted = saveData.levelTwoCompleted
     this.heartIntroduced = saveData.heartIntroduced
     this.levelOneCoinDropTarget = saveData.coinProgress.dropTarget
     this.levelOneCoinsDropped = saveData.coinProgress.dropped
@@ -816,7 +872,7 @@ class MainScene extends Phaser.Scene {
     this.levelOneCoinDropDefeatTargets = [...saveData.coinProgress.defeatTargets]
 
     this.scoreText.setText(`Score: ${this.score}`)
-    this.updateHealthDisplay()
+    this.rebuildHealthDisplay()
     this.updateCoinDisplay()
 
     this.restoreCompletedLevelOneState()
@@ -856,9 +912,11 @@ class MainScene extends Phaser.Scene {
     this.player.setVelocity(0, 0)
     this.stopSpeedBoostPulse()
     this.clearShield()
+    this.levelTwoEncounter.stop()
 
     this.enemies.clear(true, true)
     this.bullets.clear(true, true)
+    this.enemyBullets.clear(true, true)
     this.clearItems()
     this.clearCoinPickups()
 
@@ -962,6 +1020,31 @@ class MainScene extends Phaser.Scene {
 
     if (showLabel) {
       this.showFloatingText(pickup.x, pickup.y - 30, label)
+    }
+
+    return pickup
+  }
+
+  private collectPlayerPickup(item: Phaser.Physics.Arcade.Sprite) {
+    if (!item.active) return
+    const itemType = item.getData('type') as PickupType
+    const glow = item.getData('glow') as Phaser.GameObjects.Image | undefined
+    glow?.destroy()
+    item.destroy()
+    if (item === this.contestedPickup) this.clearContestedPickupState()
+
+    if (itemType === 'coffee') this.activateSpeedBoost(this.time.now)
+    else if (itemType === 'heart') this.activateHeal()
+    else if (itemType === 'shield') this.activateShield(this.time.now)
+    else if (itemType === 'ammo' || itemType === 'buckshot') {
+      this.weaponMode = itemType
+      this.weaponModeUntil = this.time.now + (itemType === 'ammo'
+        ? LEVEL_TWO_CONFIG.playerBuffs.ammoDuration
+        : LEVEL_TWO_CONFIG.playerBuffs.buckshotDuration)
+      this.showFloatingText(this.player.x, this.player.y - 34, itemType === 'ammo' ? 'QUICK FIRE' : 'BUCKSHOT')
+    } else if (itemType === 'dynamite') {
+      this.dynamiteCharges += LEVEL_TWO_CONFIG.playerBuffs.dynamiteCharges
+      this.showFloatingText(this.player.x, this.player.y - 34, `DYNAMITE x${this.dynamiteCharges}`)
     }
   }
 
@@ -1094,6 +1177,19 @@ class MainScene extends Phaser.Scene {
     })
   }
 
+  private rebuildHealthDisplay() {
+    this.heartIcons.forEach((heart) => heart.destroy())
+    this.heartIcons = []
+    for (let i = 0; i < this.maxHealth; i += 1) {
+      const heart = this.add.image(66 + i * 26, 62, i < this.health ? 'hpHeartFull' : 'hpHeartEmpty')
+      heart.setOrigin(0.5)
+      this.heartIcons.push(heart)
+    }
+    const shieldX = 66 + this.maxHealth * 26 + 14
+    this.shieldIcon.setX(shieldX)
+    this.shieldCountText.setX(shieldX + 10)
+  }
+
   private updateCoinDisplay() {
     this.coinText.setText(`：${this.coinCount}`)
   }
@@ -1130,6 +1226,10 @@ class MainScene extends Phaser.Scene {
     }
 
     this.pulseHealthUi()
+    if (this.health >= 2) {
+      this.mercyArmed = false
+      this.mercyDropAttempts = 0
+    }
   }
 
   private activateShield(time: number) {
@@ -1294,6 +1394,7 @@ class MainScene extends Phaser.Scene {
       glow?.destroy()
       item.destroy()
     })
+    this.clearContestedPickupState()
   }
 
   private clearCoinPickups() {
@@ -1321,7 +1422,13 @@ class MainScene extends Phaser.Scene {
   }
 
   private handleShooting(time: number) {
-    const shootCooldown = TIMING.shootCooldown
+    if (this.weaponModeUntil > 0 && time >= this.weaponModeUntil) {
+      this.weaponMode = null
+      this.weaponModeUntil = 0
+    }
+    const shootCooldown = this.weaponMode === 'ammo'
+      ? LEVEL_TWO_CONFIG.playerBuffs.ammoShootCooldown
+      : TIMING.shootCooldown
 
     if (time - this.lastShotTime < shootCooldown) return
 
@@ -1340,20 +1447,23 @@ class MainScene extends Phaser.Scene {
     const normalizedDx = dx / length
     const normalizedDy = dy / length
 
-    const vx = normalizedDx * bulletSpeed
-    const vy = normalizedDy * bulletSpeed
-
     this.lastShotTime = time
+    this.shotActionId += 1
+    const baseAngle = Math.atan2(normalizedDy, normalizedDx)
+    const spread = Phaser.Math.DegToRad(LEVEL_TWO_CONFIG.playerBuffs.buckshotSpreadDegrees)
+    const angles = this.weaponMode === 'buckshot'
+      ? [baseAngle - spread, baseAngle, baseAngle + spread]
+      : [baseAngle]
+    angles.forEach((angle) => this.spawnPlayerBullet(angle, bulletSpeed, this.shotActionId))
+  }
 
-    const spawnOffset = 22
-    const bullet = this.physics.add.image(
-      this.player.x + normalizedDx * spawnOffset,
-      this.player.y + normalizedDy * spawnOffset,
-      'bullet',
-    )
-
-    bullet.setData('vx', vx)
-    bullet.setData('vy', vy)
+  private spawnPlayerBullet(angle: number, speed: number, actionId: number) {
+    const dx = Math.cos(angle)
+    const dy = Math.sin(angle)
+    const bullet = this.physics.add.image(this.player.x + dx * 22, this.player.y + dy * 22, 'bullet')
+    bullet.setData('vx', dx * speed)
+    bullet.setData('vy', dy * speed)
+    bullet.setData('actionId', actionId)
     this.bullets.add(bullet)
   }
 
@@ -1372,6 +1482,39 @@ class MainScene extends Phaser.Scene {
     })
   }
 
+  private moveEnemyBullets(delta: number) {
+    const seconds = delta / 1000
+    this.enemyBullets.getChildren().forEach((child) => {
+      const bullet = child as Phaser.Physics.Arcade.Image
+      bullet.x += (bullet.getData('vx') as number) * seconds
+      bullet.y += (bullet.getData('vy') as number) * seconds
+    })
+  }
+
+  private damagePlayer(now: number) {
+    if (this.shieldCharges > 0) {
+      this.clearShield()
+      this.showBlockFlash()
+      this.showFloatingText(this.player.x, this.player.y - 20, 'BLOCK')
+      return
+    }
+    if (now - this.lastDamageTime < TIMING.damageCooldown) return
+
+    this.lastDamageTime = now
+    this.hasTakenDamage = true
+    this.health -= 1
+    this.updateHealthDisplay()
+    if (this.currentArea === 'townRoad' && this.health === 1 && !this.mercyArmed && !this.hasPickupType('heart')) {
+      this.mercyArmed = true
+      this.mercyDropAttempts = LEVEL_TWO_CONFIG.heartDrop.mercyAttempts
+      const mercyReadyAt = now + LEVEL_TWO_CONFIG.heartDrop.mercyCooldownMs
+      this.heartDropReadyAt = this.heartDropReadyAt > now ? Math.min(this.heartDropReadyAt, mercyReadyAt) : mercyReadyAt
+      this.heartDropKillsRemaining = Math.min(this.heartDropKillsRemaining, LEVEL_TWO_CONFIG.heartDrop.mercyKills)
+    }
+    this.cameras.main.shake(120, 0.008)
+    if (this.health <= 0) this.endGame()
+  }
+
   private checkBulletEnemyHits() {
     this.bullets.getChildren().forEach((bulletChild) => {
       const bullet = bulletChild as Phaser.Physics.Arcade.Image
@@ -1384,19 +1527,102 @@ class MainScene extends Phaser.Scene {
         const distance = Phaser.Math.Distance.Between(bullet.x, bullet.y, enemy.x, enemy.y)
 
         if (distance < 24) {
-          const enemyX = enemy.x
-          const enemyY = enemy.y
-
+          const actionId = (bullet.getData('actionId') as number | undefined) ?? -1
+          const hitX = enemy.x
+          const hitY = enemy.y
           bullet.destroy()
-          enemy.destroy()
-
-          this.addScore(10, enemyX, enemyY)
-          this.registerEnemyDefeat(enemyX, enemyY)
-          this.enemiesCleared += 1
-          this.checkWaveProgress()
+          const health = (enemy.getData('health') as number | undefined) ?? 1
+          if (health > 1) {
+            enemy.setData('health', health - 1)
+            enemy.setTint(0xffffff)
+            this.time.delayedCall(70, () => enemy.active && enemy.clearTint())
+          } else {
+            if (enemy.getData('explosive')) this.armExplosiveEnemy(enemy, LEVEL_TWO_CONFIG.explosion.warningMs)
+            else this.defeatEnemy(enemy, true)
+          }
+          if (this.dynamiteCharges > 0 && !this.explosiveActions.has(actionId)) {
+            this.explosiveActions.add(actionId)
+            this.dynamiteCharges -= 1
+            this.explodeAt(hitX, hitY, LEVEL_TWO_CONFIG.playerBuffs.dynamiteRadius, false)
+          }
         }
       })
     })
+  }
+
+  private defeatEnemy(enemy: Phaser.Physics.Arcade.Sprite, awardKill: boolean) {
+    if (!enemy.active) return
+    const x = enemy.x
+    const y = enemy.y
+    const batchIndex = enemy.getData('batchIndex') as number | undefined
+    const warning = enemy.getData('warning') as Phaser.GameObjects.GameObject | undefined
+    const explosionWarning = enemy.getData('explosionWarning') as Phaser.GameObjects.GameObject | undefined
+    const contenderMarker = enemy.getData('contenderMarker') as Phaser.GameObjects.GameObject | undefined
+    warning?.destroy()
+    explosionWarning?.destroy()
+    contenderMarker?.destroy()
+    enemy.destroy()
+
+    if (awardKill) {
+      this.addScore(10, x, y)
+      this.registerEnemyDefeat(x, y)
+    }
+    if (this.currentArea === 'dustyOutskirts') {
+      this.enemiesCleared += 1
+      this.checkWaveProgress()
+    } else if (batchIndex !== undefined) {
+      this.levelTwoDefeats += 1
+      this.levelTwoEncounter.registerDefeat(batchIndex)
+      if (awardKill) this.rollLevelTwoDrops(x, y)
+    }
+  }
+
+  private explodeAt(x: number, y: number, radius: number, damagesPlayer: boolean) {
+    const ring = this.add.circle(x, y, radius, 0xff6b35, 0.22).setStrokeStyle(3, 0xffd166, 0.9).setDepth(6)
+    this.tweens.add({ targets: ring, scale: 1.18, alpha: 0, duration: 260, onComplete: () => ring.destroy() })
+    const victims = this.enemies.getChildren()
+      .map((child) => child as Phaser.Physics.Arcade.Sprite)
+      .filter((enemy) => enemy.active && Phaser.Math.Distance.Between(x, y, enemy.x, enemy.y) <= radius)
+    victims.forEach((enemy) => {
+      const health = (enemy.getData('health') as number | undefined) ?? 1
+      if (health <= LEVEL_TWO_CONFIG.playerBuffs.dynamiteDamage) {
+        if (enemy.getData('explosive')) this.armExplosiveEnemy(enemy, LEVEL_TWO_CONFIG.explosion.warningMs)
+        else this.defeatEnemy(enemy, true)
+      }
+      else enemy.setData('health', health - LEVEL_TWO_CONFIG.playerBuffs.dynamiteDamage)
+    })
+    if (damagesPlayer && Phaser.Math.Distance.Between(x, y, this.player.x, this.player.y) <= radius) {
+      this.damagePlayer(this.time.now)
+    }
+  }
+
+  private hasPickupType(type: PickupType) {
+    return this.items.getChildren().some((child) => child.active && child.getData('type') === type)
+  }
+
+  private rollLevelTwoDrops(x: number, y: number) {
+    if (Math.random() < LEVEL_TWO_CONFIG.coinDropChance) this.spawnCoin(x, y)
+    if (this.health >= this.maxHealth || this.hasPickupType('heart')) return
+
+    this.heartDropKillsRemaining = Math.max(0, this.heartDropKillsRemaining - 1)
+    if (this.time.now < this.heartDropReadyAt || this.heartDropKillsRemaining > 0) return
+
+    const baseChance = LEVEL_TWO_CONFIG.heartDrop.chanceByHealth[Math.min(this.health, 3)] ?? 0
+    const chance = this.mercyDropAttempts > 0 ? Math.max(baseChance, LEVEL_TWO_CONFIG.heartDrop.mercyChance) : baseChance
+    if (Math.random() < chance || this.mercyDropAttempts === 1) {
+      this.spawnPickupSprite('heart', 'heart', 'POTION', x, y, true)
+      this.resetHeartDropCooldown()
+      this.mercyDropAttempts = 0
+      return
+    }
+    if (this.mercyDropAttempts > 0) this.mercyDropAttempts -= 1
+  }
+
+  private resetHeartDropCooldown() {
+    const [minMs, maxMs] = LEVEL_TWO_CONFIG.heartDrop.cooldownMs
+    const [minKills, maxKills] = LEVEL_TWO_CONFIG.heartDrop.cooldownKills
+    this.heartDropReadyAt = this.time.now + Phaser.Math.Between(minMs, maxMs)
+    this.heartDropKillsRemaining = Phaser.Math.Between(minKills, maxKills)
   }
 
   private checkWaveProgress() {
@@ -1485,6 +1711,7 @@ class MainScene extends Phaser.Scene {
 
     this.enemies.clear(true, true)
     this.bullets.clear(true, true)
+    this.enemyBullets.clear(true, true)
     this.clearItems()
 
     this.currentWaveItem = null
@@ -1608,6 +1835,9 @@ class MainScene extends Phaser.Scene {
   }
 
   private enterTownRoad() {
+    if (this.currentArea !== 'townRoad') {
+      this.townCheckpoint = { score: this.score, health: this.health, coins: this.coinCount, maxHealth: this.maxHealth }
+    }
     this.currentArea = 'townRoad'
     this.levelCompleted = true
     this.isAreaExitOpen = false
@@ -1617,6 +1847,7 @@ class MainScene extends Phaser.Scene {
 
     this.enemies.clear(true, true)
     this.bullets.clear(true, true)
+    this.enemyBullets.clear(true, true)
     this.clearItems()
     this.clearCoinPickups()
     this.clearShield()
@@ -1633,10 +1864,16 @@ class MainScene extends Phaser.Scene {
     this.waveText.setVisible(true)
     this.waveText.setText('Area: Town Road')
 
-    this.showAreaTitle('TOWN ROAD', 'More coming soon  |  Press R to restart')
+    this.showAreaTitle('TOWN ROAD', 'Stay sharp. The road is contested.')
+    if (!this.levelTwoCompleted) {
+      this.resetLevelTwoRuntime()
+      this.levelTwoEncounter.start(this.time.now)
+    }
   }
 
   private enterDustyOutskirtsFromTownRoad() {
+    this.levelTwoEncounter.stop()
+    this.pendingContestedPickup = false
     this.currentArea = 'dustyOutskirts'
     this.levelCompleted = true
     this.isLevelClear = true
@@ -1645,6 +1882,7 @@ class MainScene extends Phaser.Scene {
 
     this.enemies.clear(true, true)
     this.bullets.clear(true, true)
+    this.enemyBullets.clear(true, true)
     this.clearItems()
     this.clearCoinPickups()
     this.clearShield()
@@ -1662,6 +1900,23 @@ class MainScene extends Phaser.Scene {
 
     this.unlockAreaExit()
     this.showAreaTitle('DUSTY OUTSKIRTS', 'Road to town remains open')
+  }
+
+  private resetLevelTwoRuntime() {
+    this.levelTwoDefeats = 0
+    this.nextLevelTwoPickup = 0
+    this.pendingContestedPickup = false
+    this.clearContestedPickupState()
+    this.levelTwoShieldSpawned = false
+    this.finalGunslingersSpawned = 0
+    this.adaptiveSecondBusy = false
+    this.weaponMode = null
+    this.weaponModeUntil = 0
+    this.dynamiteCharges = 0
+    this.explosiveActions.clear()
+    this.resetHeartDropCooldown()
+    this.mercyArmed = false
+    this.mercyDropAttempts = 0
   }
 
   private showAreaTitle(title: string, subtitle: string) {
@@ -1805,14 +2060,447 @@ class MainScene extends Phaser.Scene {
     this.enemies.getChildren().forEach((child) => {
       const enemy = child as Phaser.Physics.Arcade.Sprite
       if (!enemy.active) return
+      if (enemy.getData('dying')) {
+        enemy.setVelocity(0, 0)
+        return
+      }
+
+      if (this.currentArea === 'townRoad' && enemy.getData('explosive')) {
+        const explosiveState = this.updateExplosiveEnemy(enemy)
+        if (explosiveState) return
+      }
+
+      if (this.currentArea === 'townRoad' && this.updateContenderMovement(enemy, this.time.now)) return
+
+      if (this.currentArea === 'townRoad') {
+        const kind = enemy.getData('kind') as EnemyKind
+        if (kind === 'charger') {
+          this.updateCharger(enemy, this.time.now)
+          return
+        }
+        if (kind === 'gunslinger') {
+          this.updateGunslinger(enemy, this.time.now)
+          return
+        }
+      }
 
       const speed = enemy.getData('speed') as number
       this.physics.moveToObject(enemy, this.player, speed)
     })
   }
 
+  private updateCharger(enemy: Phaser.Physics.Arcade.Sprite, time: number) {
+    const config = LEVEL_TWO_CONFIG.enemy.charger
+    const state = (enemy.getData('state') as string | undefined) ?? 'track'
+    const stateUntil = (enemy.getData('stateUntil') as number | undefined) ?? 0
+
+    if (state === 'charge') {
+      if (time >= stateUntil || enemy.x <= 34 || enemy.x >= GAME_WIDTH - 34 || enemy.y <= 34 || enemy.y >= GAME_HEIGHT - 34) {
+        if (enemy.getData('explosive')) {
+          this.armExplosiveEnemy(enemy, LEVEL_TWO_CONFIG.explosion.warningMs)
+          return
+        }
+        enemy.setData('state', 'recover')
+        const recovery = enemy.getData('coffeeBoosted') ? config.recoverMs * config.coffeeRecoveryMultiplier : config.recoverMs
+        enemy.setData('stateUntil', time + recovery)
+        enemy.setVelocity(0, 0)
+      }
+      return
+    }
+    if (state === 'recover') {
+      enemy.setVelocity(0, 0)
+      if (time >= stateUntil) enemy.setData('state', 'track')
+      return
+    }
+    if (state === 'telegraph') {
+      enemy.setVelocity(0, 0)
+      if (time >= stateUntil) {
+        const dx = enemy.getData('chargeDx') as number
+        const dy = enemy.getData('chargeDy') as number
+        const warning = enemy.getData('warning') as Phaser.GameObjects.Line | undefined
+        warning?.destroy()
+        enemy.setData('warning', undefined)
+        enemy.setData('state', 'charge')
+        enemy.setData('stateUntil', time + config.chargeMs)
+        const multiplier = enemy.getData('coffeeBoosted') ? config.coffeeSpeedMultiplier : 1
+        enemy.setVelocity(dx * config.chargeSpeed * multiplier, dy * config.chargeSpeed * multiplier)
+      }
+      return
+    }
+
+    const distance = Phaser.Math.Distance.Between(enemy.x, enemy.y, this.player.x, this.player.y)
+    if (distance <= config.prepareDistance) {
+      const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, this.player.x, this.player.y)
+      const dx = Math.cos(angle)
+      const dy = Math.sin(angle)
+      const warning = this.add.line(0, 0, enemy.x, enemy.y, enemy.x + dx * 230, enemy.y + dy * 230, 0xff8c42, 0.75)
+        .setOrigin(0, 0).setDepth(4)
+      enemy.setData('warning', warning)
+      enemy.setData('chargeDx', dx)
+      enemy.setData('chargeDy', dy)
+      enemy.setData('state', 'telegraph')
+      enemy.setData('stateUntil', time + config.telegraphMs)
+      enemy.setVelocity(0, 0)
+      enemy.setTint(0xffb347)
+      return
+    }
+    const speed = config.speed * (enemy.getData('coffeeBoosted') ? config.coffeeSpeedMultiplier : 1)
+    this.physics.moveToObject(enemy, this.player, speed)
+  }
+
+  private updateExplosiveEnemy(enemy: Phaser.Physics.Arcade.Sprite) {
+    const kind = enemy.getData('kind') as EnemyKind
+    if (kind === 'chaser') {
+      const distance = Phaser.Math.Distance.Between(enemy.x, enemy.y, this.player.x, this.player.y)
+      if (distance <= LEVEL_TWO_CONFIG.explosion.proximity) {
+        this.armExplosiveEnemy(enemy, LEVEL_TWO_CONFIG.explosion.warningMs)
+        return true
+      }
+    }
+    return false
+  }
+
+  private armExplosiveEnemy(enemy: Phaser.Physics.Arcade.Sprite, delay: number) {
+    if (!enemy.active || enemy.getData('dying')) return
+    enemy.setData('dying', true)
+    enemy.setVelocity(0, 0)
+    const radius = LEVEL_TWO_CONFIG.explosion.radius
+    const warning = this.add.circle(enemy.x, enemy.y, radius, 0xff4d2e, 0.12)
+      .setStrokeStyle(3, 0xff704d, 0.9).setDepth(3)
+    enemy.setData('explosionWarning', warning)
+    this.tweens.add({ targets: warning, alpha: 0.4, duration: 110, yoyo: true, repeat: -1 })
+    this.time.delayedCall(delay, () => {
+      if (!enemy.active || this.currentArea !== 'townRoad') {
+        warning.destroy()
+        return
+      }
+      const x = enemy.x
+      const y = enemy.y
+      warning.destroy()
+      this.defeatEnemy(enemy, true)
+      this.explodeAt(x, y, radius, true)
+    })
+  }
+
+  private updateGunslinger(enemy: Phaser.Physics.Arcade.Sprite, time: number) {
+    const config = LEVEL_TWO_CONFIG.enemy.gunslinger
+    const distance = Phaser.Math.Distance.Between(enemy.x, enemy.y, this.player.x, this.player.y)
+    const busy = enemy.getData('busy') as boolean | undefined
+    if (!busy) {
+      if (distance < config.preferredDistance - config.distanceTolerance) {
+        const angle = Phaser.Math.Angle.Between(this.player.x, this.player.y, enemy.x, enemy.y)
+        enemy.setVelocity(Math.cos(angle) * config.speed, Math.sin(angle) * config.speed)
+      } else if (distance > config.preferredDistance + config.distanceTolerance) {
+        this.physics.moveToObject(enemy, this.player, config.speed)
+      } else {
+        const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, this.player.x, this.player.y) + Math.PI / 2
+        enemy.setVelocity(Math.cos(angle) * config.speed * 0.45, Math.sin(angle) * config.speed * 0.45)
+      }
+    }
+
+    const nextAttack = (enemy.getData('nextAttack') as number | undefined) ?? time
+    if (!busy && time >= nextAttack) this.startGunslingerAttack(enemy, time)
+  }
+
+  private startGunslingerAttack(enemy: Phaser.Physics.Arcade.Sprite, time: number) {
+    const config = LEVEL_TWO_CONFIG.enemy.gunslinger
+    enemy.setData('busy', true)
+    enemy.setVelocity(0, 0)
+    enemy.setTint(0xffd166)
+    const vx = this.player.body?.velocity.x ?? 0
+    const vy = this.player.body?.velocity.y ?? 0
+    const targets = [
+      { x: this.player.x, y: this.player.y },
+      { x: this.player.x + vx * config.predictionMs / 1000, y: this.player.y + vy * config.predictionMs / 1000 },
+    ]
+
+    const upgrade = enemy.getData('upgrade') as GunslingerUpgrade | undefined
+
+    this.time.delayedCall(config.telegraphMs, () => {
+      if (!enemy.active || this.currentArea !== 'townRoad') return
+      if (upgrade === 'buckshot') this.fireEnemySpread(enemy, targets[0], 23)
+      else this.fireEnemyBullet(enemy, targets[0])
+      this.time.delayedCall(config.shotGapMs, () => {
+        if (!enemy.active || this.currentArea !== 'townRoad') return
+        if (!upgrade) {
+          this.fireEnemyBullet(enemy, targets[1])
+          this.finishGunslingerAttack(enemy, time)
+          return
+        }
+        if (upgrade === 'ammo') this.fireEnemyBullet(enemy, targets[1])
+        const observedX = this.player.x
+        const observedY = this.player.y
+        this.time.delayedCall(config.adaptiveObserveMs, () => {
+          if (!enemy.active || this.currentArea !== 'townRoad') return
+          const dx = this.player.x - observedX
+          const dy = this.player.y - observedY
+          const length = Math.max(1, Math.hypot(dx, dy))
+          const direction = { x: dx / length, y: dy / length }
+          const secondTarget = { x: this.player.x + direction.x * 75, y: this.player.y + direction.y * 75 }
+          const farTarget = { x: this.player.x + direction.x * 145, y: this.player.y + direction.y * 145 }
+          this.beginAdaptiveSecondGroup(enemy, time, upgrade, secondTarget, farTarget)
+        })
+      })
+    })
+  }
+
+  private beginAdaptiveSecondGroup(
+    enemy: Phaser.Physics.Arcade.Sprite,
+    attackStartedAt: number,
+    upgrade: GunslingerUpgrade,
+    target: { x: number; y: number },
+    farTarget: { x: number; y: number },
+  ) {
+    if (this.adaptiveSecondBusy) {
+      this.time.delayedCall(60, () => enemy.active
+        && this.beginAdaptiveSecondGroup(enemy, attackStartedAt, upgrade, target, farTarget))
+      return
+    }
+    this.adaptiveSecondBusy = true
+    enemy.setTint(0xffffff)
+    this.time.delayedCall(LEVEL_TWO_CONFIG.enemy.gunslinger.adaptiveRetargetMs, () => {
+      if (!enemy.active || this.currentArea !== 'townRoad') {
+        this.adaptiveSecondBusy = false
+        return
+      }
+      if (upgrade === 'buckshot') {
+        this.fireEnemySpread(enemy, target, 17)
+        this.adaptiveSecondBusy = false
+        this.finishGunslingerAttack(enemy, attackStartedAt)
+      } else {
+        this.fireEnemyBullet(enemy, target)
+        this.time.delayedCall(LEVEL_TWO_CONFIG.enemy.gunslinger.shotGapMs, () => {
+          if (enemy.active && this.currentArea === 'townRoad') this.fireEnemyBullet(enemy, farTarget)
+          this.adaptiveSecondBusy = false
+          if (enemy.active) this.finishGunslingerAttack(enemy, attackStartedAt)
+        })
+      }
+    })
+  }
+
+  private finishGunslingerAttack(enemy: Phaser.Physics.Arcade.Sprite, attackStartedAt: number) {
+    enemy.clearTint()
+    const upgrade = enemy.getData('upgrade') as GunslingerUpgrade | undefined
+    if (upgrade) enemy.setTint(upgrade === 'ammo' ? 0x78b7ff : 0xffc36b)
+    enemy.setData('busy', false)
+    enemy.setData('nextAttack', attackStartedAt + LEVEL_TWO_CONFIG.enemy.gunslinger.attackCooldown)
+  }
+
+  private fireEnemySpread(enemy: Phaser.Physics.Arcade.Sprite, target: { x: number; y: number }, spreadDegrees: number) {
+    const base = Phaser.Math.Angle.Between(enemy.x, enemy.y, target.x, target.y)
+    const spread = Phaser.Math.DegToRad(spreadDegrees)
+    ;[base - spread, base, base + spread].forEach((angle) => {
+      const distance = 100
+      this.fireEnemyBullet(enemy, { x: enemy.x + Math.cos(angle) * distance, y: enemy.y + Math.sin(angle) * distance })
+    })
+  }
+
+  private fireEnemyBullet(enemy: Phaser.Physics.Arcade.Sprite, target: { x: number; y: number }) {
+    const speed = LEVEL_TWO_CONFIG.enemy.gunslinger.bulletSpeed
+    const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, target.x, target.y)
+    const bullet = this.physics.add.image(enemy.x, enemy.y, 'enemyBullet')
+    bullet.setData('vx', Math.cos(angle) * speed)
+    bullet.setData('vy', Math.sin(angle) * speed)
+    this.enemyBullets.add(bullet)
+  }
+
+  private updateLevelTwo(time: number) {
+    if (this.levelTwoCompleted) return
+
+    const kind = this.levelTwoEncounter.update(time, this.enemies.countActive(true))
+    if (kind) this.spawnLevelTwoEnemy(kind)
+    this.updateContestedPickupPlan(time)
+    this.ensurePrimaryContender()
+    if (!this.levelTwoShieldSpawned && this.levelTwoDefeats / LEVEL_TWO_TOTAL_ENEMIES >= LEVEL_TWO_CONFIG.shieldProgress) {
+      this.levelTwoShieldSpawned = true
+      this.spawnShield(true)
+      this.showFloatingText(GAME_WIDTH / 2, 120, 'SHIELD SUPPLY')
+    }
+
+    if (this.levelTwoEncounter.isComplete(this.enemies.countActive(true))) {
+      this.levelTwoCompleted = true
+      this.levelTwoEncounter.stop()
+      this.enemyBullets.clear(true, true)
+      this.clearItems()
+      this.maxHealth += LEVEL_TWO_CONFIG.completionRewardHealth
+      this.health = Math.min(this.maxHealth, this.health + LEVEL_TWO_CONFIG.completionRewardHealth)
+      this.rebuildHealthDisplay()
+      this.showAreaTitle('TOWN ROAD CLEAR', 'The road is safe... for now')
+    }
+  }
+
+  private updateContestedPickupPlan(time: number) {
+    if (this.contestedPickup?.active || this.pendingContestedPickup) return
+    const plan = LEVEL_TWO_CONFIG.contestedPickup.plans[this.nextLevelTwoPickup]
+    if (!plan || this.levelTwoDefeats / LEVEL_TWO_TOTAL_ENEMIES < plan.progress) return
+    if (this.getEligibleContenders(plan.type).length === 0) return
+
+    this.pendingContestedPickup = true
+    const { edgePadding, minPlayerDistance, landingWarningMs, reactionDelayMs } = LEVEL_TWO_CONFIG.contestedPickup
+    let x = GAME_WIDTH / 2
+    let y = GAME_HEIGHT / 2
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const candidateX = Phaser.Math.Between(edgePadding, GAME_WIDTH - edgePadding)
+      const candidateY = Phaser.Math.Between(edgePadding, GAME_HEIGHT - edgePadding)
+      if (Phaser.Math.Distance.Between(candidateX, candidateY, this.player.x, this.player.y) >= minPlayerDistance) {
+        x = candidateX
+        y = candidateY
+        break
+      }
+    }
+    const warning = this.add.circle(x, y, 28, 0xffd166, 0.14).setStrokeStyle(2, 0xffd166, 0.9).setDepth(3)
+    this.tweens.add({ targets: warning, scale: 1.35, duration: 180, yoyo: true, repeat: 2 })
+    this.time.delayedCall(landingWarningMs, () => {
+      warning.destroy()
+      if (this.currentArea !== 'townRoad' || this.levelTwoCompleted) {
+        this.pendingContestedPickup = false
+        return
+      }
+      const labels: Record<ContestedPickupType, string> = {
+        coffee: 'COFFEE', ammo: 'AMMO', buckshot: 'BUCKSHOT', dynamite: 'DYNAMITE',
+      }
+      this.contestedPickup = this.spawnPickupSprite(plan.type, plan.type, labels[plan.type], x, y, true)
+      this.contenderEnabledAt = time + landingWarningMs + reactionDelayMs
+      this.pendingContestedPickup = false
+      this.nextLevelTwoPickup += 1
+      this.assignPrimaryContender(plan.type)
+    })
+  }
+
+  private getEligibleContenders(type: ContestedPickupType) {
+    if ((type === 'ammo' || type === 'buckshot')
+      && this.enemies.getChildren().some((child) => child.active && child.getData('upgrade'))) return []
+    return this.enemies.getChildren()
+      .map((child) => child as Phaser.Physics.Arcade.Sprite)
+      .filter((enemy) => {
+        if (!enemy.active || enemy.getData('busy') || enemy.getData('state') === 'charge' || enemy.getData('state') === 'telegraph') return false
+        const kind = enemy.getData('kind') as EnemyKind
+        return type === 'ammo' || type === 'buckshot' ? kind === 'gunslinger' : kind === 'chaser' || kind === 'charger'
+      })
+  }
+
+  private assignPrimaryContender(type: ContestedPickupType) {
+    const candidates = this.getEligibleContenders(type)
+    if (candidates.length === 0) return
+    this.primaryContender = Phaser.Utils.Array.GetRandom(candidates)
+    const marker = this.add.text(this.primaryContender.x, this.primaryContender.y - 28, '!', {
+      fontFamily: 'monospace', fontSize: '24px', color: '#ffdf64', stroke: '#2b1d16', strokeThickness: 4,
+    }).setOrigin(0.5).setDepth(10)
+    this.primaryContender.setData('contenderMarker', marker)
+    this.primaryContender.setTint(0xffdf64)
+  }
+
+  private ensurePrimaryContender() {
+    if (!this.contestedPickup?.active) return
+    if (this.primaryContender?.active) {
+      const marker = this.primaryContender.getData('contenderMarker') as Phaser.GameObjects.Text | undefined
+      marker?.setPosition(this.primaryContender.x, this.primaryContender.y - 28)
+      return
+    }
+    const type = this.contestedPickup.getData('type') as ContestedPickupType
+    this.assignPrimaryContender(type)
+  }
+
+  private updateContenderMovement(enemy: Phaser.Physics.Arcade.Sprite, time: number) {
+    const pickup = this.contestedPickup
+    if (!pickup?.active || time < this.contenderEnabledAt) return false
+    const type = pickup.getData('type') as ContestedPickupType
+    if (!this.getEligibleContenders(type).includes(enemy)) return false
+    const distance = Phaser.Math.Distance.Between(enemy.x, enemy.y, pickup.x, pickup.y)
+    const isPrimary = enemy === this.primaryContender
+    if (!isPrimary && distance > 52) return false
+
+    if (isPrimary && enemy.getData('kind') === 'gunslinger') {
+      const playerDistance = Phaser.Math.Distance.Between(this.player.x, this.player.y, pickup.x, pickup.y)
+      if (playerDistance < 150 && distance > LEVEL_TWO_CONFIG.contestedPickup.pickupDistance) {
+        const blockTarget = {
+          x: (this.player.x + pickup.x) / 2,
+          y: (this.player.y + pickup.y) / 2,
+        }
+        this.physics.moveTo(enemy, blockTarget.x, blockTarget.y, LEVEL_TWO_CONFIG.enemy.gunslinger.speed)
+        const nextAttack = (enemy.getData('nextAttack') as number | undefined) ?? time
+        if (!enemy.getData('busy') && time >= nextAttack) this.startGunslingerAttack(enemy, time)
+        return true
+      }
+    }
+
+    if (distance <= LEVEL_TWO_CONFIG.contestedPickup.pickupDistance) {
+      const holdUntil = enemy.getData('pickupHoldUntil') as number | undefined
+      if (!holdUntil) {
+        enemy.setData('pickupHoldUntil', time + LEVEL_TWO_CONFIG.contestedPickup.enemyPickupHoldMs)
+        enemy.setVelocity(0, 0)
+      } else if (time >= holdUntil && pickup.active) {
+        this.applyEnemyPickup(enemy, type)
+        const glow = pickup.getData('glow') as Phaser.GameObjects.Image | undefined
+        glow?.destroy()
+        pickup.destroy()
+        this.clearContestedPickupState()
+      }
+      return true
+    }
+    enemy.setData('pickupHoldUntil', undefined)
+    this.physics.moveToObject(enemy, pickup, (enemy.getData('speed') as number) || 90)
+    return true
+  }
+
+  private clearContestedPickupState() {
+    if (this.primaryContender?.active) {
+      const marker = this.primaryContender.getData('contenderMarker') as Phaser.GameObjects.Text | undefined
+      marker?.destroy()
+      this.primaryContender.setData('contenderMarker', undefined)
+      this.primaryContender.clearTint()
+    }
+    this.primaryContender = undefined
+    this.contestedPickup = undefined
+  }
+
+  private applyEnemyPickup(enemy: Phaser.Physics.Arcade.Sprite, type: ContestedPickupType) {
+    const kind = enemy.getData('kind') as EnemyKind
+    if (type === 'coffee') {
+      if (kind === 'chaser') {
+        enemy.setData('kind', 'charger')
+        enemy.setTexture('charger')
+        enemy.setData('health', LEVEL_TWO_CONFIG.enemy.charger.health)
+        enemy.setData('state', 'track')
+      } else {
+        enemy.setData('coffeeBoosted', true)
+      }
+      enemy.setTint(0xf5c16c)
+    } else if (type === 'dynamite') {
+      enemy.setData('explosive', true)
+      enemy.setTint(0xff704d)
+    } else if (kind === 'gunslinger') {
+      enemy.setData('upgrade', type)
+      enemy.setTint(type === 'ammo' ? 0x78b7ff : 0xffc36b)
+    }
+    this.showFloatingText(enemy.x, enemy.y - 30, 'ENEMY POWER UP')
+  }
+
+  private spawnLevelTwoEnemy(kind: EnemyKind) {
+    const isFinalGunslinger = kind === 'gunslinger'
+      && this.levelTwoEncounter.getCurrentBatchIndex() === LEVEL_TWO_CONFIG.batches.length - 1
+    const side = isFinalGunslinger ? (this.finalGunslingersSpawned === 0 ? 3 : 1) : Phaser.Math.Between(0, 3)
+    if (isFinalGunslinger) this.finalGunslingersSpawned += 1
+    const x = side === 1 ? GAME_WIDTH - 40 : side === 3 ? 40 : Phaser.Math.Between(40, GAME_WIDTH - 40)
+    const y = side === 0 ? 40 : side === 2 ? GAME_HEIGHT - 40 : Phaser.Math.Between(40, GAME_HEIGHT - 40)
+    const enemy = this.physics.add.sprite(x, y, kind === 'chaser' ? 'enemy' : kind)
+    const [minSpeed, maxSpeed] = LEVEL_TWO_CONFIG.enemy.chaser.speed
+
+    enemy.setData('kind', kind)
+    enemy.setData('health', kind === 'chaser' ? 1 : 2)
+    enemy.setData('speed', Phaser.Math.Between(minSpeed, maxSpeed))
+    enemy.setData('batchIndex', this.levelTwoEncounter.getCurrentBatchIndex())
+    enemy.setData('state', 'track')
+    if (kind === 'gunslinger') {
+      const gunslingers = this.enemies.getChildren().filter((child) => child.getData('kind') === 'gunslinger').length
+      const offsetIndex = Math.min(gunslingers, LEVEL_TWO_CONFIG.enemy.gunslinger.finalAttackOffset.length - 1)
+      enemy.setData('nextAttack', this.time.now + LEVEL_TWO_CONFIG.enemy.gunslinger.finalAttackOffset[offsetIndex])
+    }
+    this.enemies.add(enemy)
+  }
+
   private cleanBullets() {
-    this.bullets.getChildren().forEach((child) => {
+    const cleanGroup = (group: Phaser.Physics.Arcade.Group) => group.getChildren().forEach((child) => {
       const bullet = child as Phaser.Physics.Arcade.Image
       if (!bullet.active) return
 
@@ -1826,6 +2514,8 @@ class MainScene extends Phaser.Scene {
         bullet.destroy()
       }
     })
+    cleanGroup(this.bullets)
+    cleanGroup(this.enemyBullets)
   }
 }
 

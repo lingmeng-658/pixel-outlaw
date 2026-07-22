@@ -1,4 +1,10 @@
-export type PickupType = 'coffee' | 'heart' | 'shield'
+export type PickupType = 'coffee' | 'heart' | 'shield' | 'ammo' | 'buckshot' | 'dynamite'
+
+export type EnemyKind = 'chaser' | 'charger' | 'gunslinger'
+
+export type ContestedPickupType = 'coffee' | 'ammo' | 'buckshot' | 'dynamite'
+
+export type GunslingerUpgrade = 'ammo' | 'buckshot'
 
 export type LevelOneSaveStage =
   | 'intro'
