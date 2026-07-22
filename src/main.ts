@@ -12,7 +12,7 @@ import { LEVEL_ONE_CONFIG } from './levelOne'
 import { createLevelOneSaveData, loadLevelOneSaveData, SAVE_KEY } from './save'
 import { createTextures } from './textures'
 import type { LevelOneSaveData } from './save'
-import type { AreaId, LevelOneSaveStage, PickupType } from './types'
+import type { AreaId, PickupType } from './types'
 
 class MainScene extends Phaser.Scene {
   private player!: Phaser.Physics.Arcade.Sprite
@@ -547,6 +547,7 @@ class MainScene extends Phaser.Scene {
     this.levelCompleted = false
     this.isPaused = false
     this.pauseStartedAt = 0
+    this.continueText = undefined
 
     this.lastShotTime = 0
     this.lastSpawnTime = 0
@@ -726,45 +727,29 @@ class MainScene extends Phaser.Scene {
     this.scene.restart({ autoStart: true })
   }
 
-  private getLevelOneSaveStage(): LevelOneSaveStage {
-    if (this.levelCompleted) {
-      return 'clear'
-    }
-
-    if (this.currentWaveItem === 'heart') {
-      return 'heart'
-    }
-
-    if (this.currentWaveItem === 'coffee') {
-      return 'coffee'
-    }
-
-    if (this.currentWaveItem === 'shield') {
-      return 'shield'
-    }
-
-    if (this.finalPressureWaveDone && this.currentWaveItem === null) {
-      return 'final'
-    }
-
-    return 'intro'
-  }
-
   private saveAndQuit() {
+    const isCompletedSave = this.levelCompleted
     const saveData = createLevelOneSaveData({
-      area: this.currentArea,
-      levelCompleted: this.levelCompleted,
-      stage: this.getLevelOneSaveStage(),
-      score: this.score,
-      health: this.health,
-      coins: this.coinCount,
-      heartIntroduced: this.heartIntroduced,
-      coinProgress: {
-        dropTarget: this.levelOneCoinDropTarget,
-        dropped: this.levelOneCoinsDropped,
-        enemyDefeats: this.levelOneEnemyDefeats,
-        defeatTargets: [...this.levelOneCoinDropDefeatTargets],
-      },
+      area: isCompletedSave ? this.currentArea : 'dustyOutskirts',
+      levelCompleted: isCompletedSave,
+      stage: isCompletedSave ? 'clear' : 'intro',
+      score: isCompletedSave ? this.score : 0,
+      health: isCompletedSave ? this.health : MAX_HEALTH,
+      coins: isCompletedSave ? this.coinCount : 0,
+      heartIntroduced: false,
+      coinProgress: isCompletedSave
+        ? {
+            dropTarget: this.levelOneCoinDropTarget,
+            dropped: this.levelOneCoinsDropped,
+            enemyDefeats: this.levelOneEnemyDefeats,
+            defeatTargets: [...this.levelOneCoinDropDefeatTargets],
+          }
+        : {
+            dropTarget: 0,
+            dropped: 0,
+            enemyDefeats: 0,
+            defeatTargets: [],
+          },
     })
 
     try {
@@ -816,6 +801,10 @@ class MainScene extends Phaser.Scene {
   }
 
   private restoreSavedGame(saveData: LevelOneSaveData) {
+    if (!saveData.levelCompleted) {
+      return
+    }
+
     this.score = saveData.score
     this.health = saveData.health
     this.coinCount = saveData.coins
@@ -830,49 +819,14 @@ class MainScene extends Phaser.Scene {
     this.updateHealthDisplay()
     this.updateCoinDisplay()
 
+    this.restoreCompletedLevelOneState()
+
     if (saveData.area === 'townRoad') {
-      this.restoreCompletedLevelOneState()
       this.enterTownRoad()
       return
     }
 
-    if (saveData.levelCompleted || saveData.stage === 'clear') {
-      this.restoreCompletedLevelOneState()
-      this.restoreCompletedDustyOutskirts()
-      return
-    }
-
-    this.restoreLevelOneCheckpoint(saveData.stage, saveData.heartIntroduced)
-  }
-
-  private restoreLevelOneCheckpoint(stage: Exclude<LevelOneSaveStage, 'clear'>, heartIntroduced: boolean) {
-    const checkpoint = {
-      intro: { wave: 1, enemies: LEVEL_ONE_CONFIG.initialEnemies, item: null },
-      heart: { wave: 2, enemies: LEVEL_ONE_CONFIG.heartEnemies, item: 'heart' },
-      coffee: { wave: heartIntroduced ? 3 : 2, enemies: LEVEL_ONE_CONFIG.coffeeEnemies, item: 'coffee' },
-      shield: { wave: heartIntroduced ? 4 : 3, enemies: LEVEL_ONE_CONFIG.shieldEnemies, item: 'shield' },
-      final: { wave: heartIntroduced ? 5 : 4, enemies: LEVEL_ONE_CONFIG.finalEnemies, item: null },
-    }[stage] as { wave: number; enemies: number; item: PickupType | null }
-
-    this.currentArea = 'dustyOutskirts'
-    this.levelCompleted = false
-    this.wave = checkpoint.wave
-    this.enemiesToSpawn = checkpoint.enemies
-    this.enemiesSpawned = 0
-    this.enemiesCleared = 0
-    this.isLevelClear = false
-    this.hasTakenDamage = stage === 'heart'
-    this.currentWaveItem = checkpoint.item
-    this.itemSpawnedThisWave = false
-    this.heartIntroduced = stage === 'heart' ? false : heartIntroduced
-    this.coffeeIntroduced = stage === 'shield' || stage === 'final'
-    this.shieldIntroduced = stage === 'final'
-    this.finalPressureWaveDone = stage === 'final'
-    this.levelStartTime = this.time.now
-    this.lastSpawnTime = 0
-
-    this.player.setPosition(GAME_WIDTH / 2, GAME_HEIGHT / 2)
-    this.waveText.setText(`Wave: ${this.wave}`)
+    this.restoreCompletedDustyOutskirts()
   }
 
   private restoreCompletedLevelOneState() {

@@ -110,7 +110,7 @@ https://lingmeng-658.github.io/pixel-outlaw/
 - R Restart Level
 - S Save Progress & Quit
 
-存档采用阶段起点检查点恢复：保存分数、生命、金币、区域、通关状态和第一关阶段；Continue 后从对应阶段的稳定起点继续，不恢复敌人、子弹、地面道具、玩家精确位置或限时道具的剩余时间。
+存档采用关卡级检查点恢复：第一关未通关时，Continue 从 Dusty Outskirts 关卡开头重新开始；已通关时恢复 Dusty Outskirts 出口或 Town Road 区域。不会保存或恢复中途波次、战场对象、玩家精确位置或限时道具剩余时间。
 
 localStorage key：
 
