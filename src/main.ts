@@ -9,8 +9,9 @@ import {
   TIMING,
 } from './constants'
 import { LEVEL_ONE_CONFIG } from './levelOne'
-import { createLevelOneSaveData, SAVE_KEY } from './save'
+import { createLevelOneSaveData, loadLevelOneSaveData, SAVE_KEY } from './save'
 import { createTextures } from './textures'
+import type { LevelOneSaveData } from './save'
 import type { AreaId, LevelOneSaveStage, PickupType } from './types'
 
 class MainScene extends Phaser.Scene {
@@ -27,6 +28,7 @@ class MainScene extends Phaser.Scene {
   private health: number = MAX_HEALTH
   private isStarted = false
   private isGameOver = false
+  private levelCompleted = false
   private isPaused = false
   private pauseStartedAt = 0
 
@@ -40,6 +42,7 @@ class MainScene extends Phaser.Scene {
   private waveText!: Phaser.GameObjects.Text
   private titleText!: Phaser.GameObjects.Text
   private startText!: Phaser.GameObjects.Text
+  private continueText?: Phaser.GameObjects.Text
   private tipText!: Phaser.GameObjects.Text
   private gameOverText!: Phaser.GameObjects.Text
   private pauseOverlay!: Phaser.GameObjects.Rectangle
@@ -89,6 +92,7 @@ class MainScene extends Phaser.Scene {
   private exitMarkerObjects: Phaser.GameObjects.GameObject[] = []
   private areaTitleObjects: Phaser.GameObjects.GameObject[] = []
   private levelCompleteText?: Phaser.GameObjects.Text
+  private savedGame: LevelOneSaveData | null = null
 
   constructor() {
     super('MainScene')
@@ -96,6 +100,7 @@ class MainScene extends Phaser.Scene {
 
   create(data?: { autoStart?: boolean }) {
     this.resetGameState()
+    this.savedGame = loadLevelOneSaveData()
     createTextures(this)
 
     this.cameras.main.setBackgroundColor('#2b1d16')
@@ -180,7 +185,9 @@ class MainScene extends Phaser.Scene {
       strokeThickness: 8,
     }).setOrigin(0.5)
 
-    this.startText = this.add.text(GAME_WIDTH / 2, 300, 'START GAME', {
+    const hasSavedGame = this.savedGame !== null
+
+    this.startText = this.add.text(GAME_WIDTH / 2, hasSavedGame ? 280 : 300, 'START GAME', {
       fontFamily: 'monospace',
       fontSize: '30px',
       color: '#2b1d16',
@@ -193,13 +200,35 @@ class MainScene extends Phaser.Scene {
 
     this.startText.setInteractive({ useHandCursor: true })
 
-    this.tipText = this.add.text(GAME_WIDTH / 2, 370, 'Click START or press SPACE\nWASD move  |  Arrow keys shoot  |  ESC pause', {
+    if (hasSavedGame) {
+      this.continueText = this.add.text(GAME_WIDTH / 2, 345, 'CONTINUE SAVED GAME', {
+        fontFamily: 'monospace',
+        fontSize: '24px',
+        color: '#ffe6a7',
+        backgroundColor: '#704f32',
+        padding: {
+          x: 16,
+          y: 9,
+        },
+      }).setOrigin(0.5)
+
+      this.continueText.setInteractive({ useHandCursor: true })
+    }
+
+    this.tipText = this.add.text(
+      GAME_WIDTH / 2,
+      hasSavedGame ? 410 : 370,
+      hasSavedGame
+        ? 'SPACE New Game  |  C Continue\nWASD move  |  Arrow keys shoot  |  ESC pause'
+        : 'Click START or press SPACE\nWASD move  |  Arrow keys shoot  |  ESC pause',
+      {
       fontFamily: 'monospace',
       fontSize: '20px',
       color: '#f5c16c',
       align: 'center',
       lineSpacing: 10,
-    }).setOrigin(0.5)
+      },
+    ).setOrigin(0.5)
 
     this.gameOverText = this.add.text(GAME_WIDTH / 2, 280, '', {
       fontFamily: 'monospace',
@@ -235,10 +264,14 @@ class MainScene extends Phaser.Scene {
       throw new Error('Keyboard input is not available')
     }
 
-    this.keys = this.input.keyboard.addKeys('W,A,S,D,UP,DOWN,LEFT,RIGHT,SPACE,R,ESC,K') as Record<string, Phaser.Input.Keyboard.Key>
+    this.keys = this.input.keyboard.addKeys('W,A,S,D,UP,DOWN,LEFT,RIGHT,SPACE,C,R,ESC,K') as Record<string, Phaser.Input.Keyboard.Key>
 
     this.startText.on('pointerdown', () => {
       this.startGame()
+    })
+
+    this.continueText?.on('pointerdown', () => {
+      this.continueSavedGame()
     })
 
     this.physics.add.overlap(this.player, this.enemies, (_playerObject, enemyObject) => {
@@ -511,6 +544,7 @@ class MainScene extends Phaser.Scene {
     this.health = MAX_HEALTH
     this.isStarted = false
     this.isGameOver = false
+    this.levelCompleted = false
     this.isPaused = false
     this.pauseStartedAt = 0
 
@@ -568,6 +602,11 @@ class MainScene extends Phaser.Scene {
   private handleStartInput() {
     if (Phaser.Input.Keyboard.JustDown(this.keys.SPACE)) {
       this.startGame()
+      return
+    }
+
+    if (this.savedGame && Phaser.Input.Keyboard.JustDown(this.keys.C)) {
+      this.continueSavedGame()
     }
   }
 
@@ -626,6 +665,7 @@ class MainScene extends Phaser.Scene {
 
     this.isPaused = true
     this.pauseStartedAt = Date.now()
+    this.pauseText.setText('PAUSED\n\n[ESC] Continue\n[R] Restart Level\n[S] Save Progress & Quit')
 
     this.player.setVelocity(0, 0)
     this.enemies.getChildren().forEach((child) => {
@@ -687,7 +727,7 @@ class MainScene extends Phaser.Scene {
   }
 
   private getLevelOneSaveStage(): LevelOneSaveStage {
-    if (this.isLevelClear && this.finalPressureWaveDone) {
+    if (this.levelCompleted) {
       return 'clear'
     }
 
@@ -712,12 +752,27 @@ class MainScene extends Phaser.Scene {
 
   private saveAndQuit() {
     const saveData = createLevelOneSaveData({
+      area: this.currentArea,
+      levelCompleted: this.levelCompleted,
       stage: this.getLevelOneSaveStage(),
       score: this.score,
       health: this.health,
+      coins: this.coinCount,
+      heartIntroduced: this.heartIntroduced,
+      coinProgress: {
+        dropTarget: this.levelOneCoinDropTarget,
+        dropped: this.levelOneCoinsDropped,
+        enemyDefeats: this.levelOneEnemyDefeats,
+        defeatTargets: [...this.levelOneCoinDropDefeatTargets],
+      },
     })
 
-    localStorage.setItem(SAVE_KEY, JSON.stringify(saveData))
+    try {
+      localStorage.setItem(SAVE_KEY, JSON.stringify(saveData))
+    } catch {
+      this.pauseText.setText('SAVE FAILED\n\n[ESC] Continue\n[R] Restart Level\n[S] Try Again')
+      return
+    }
 
     this.prepareSceneChangeFromPause()
     this.scene.restart()
@@ -739,7 +794,103 @@ class MainScene extends Phaser.Scene {
     this.player.setVisible(true)
     this.titleText.setVisible(false)
     this.startText.setVisible(false)
+    this.continueText?.setVisible(false)
     this.tipText.setVisible(false)
+  }
+
+  private continueSavedGame() {
+    if (this.isStarted) return
+
+    const saveData = loadLevelOneSaveData()
+    if (!saveData) {
+      this.savedGame = null
+      this.continueText?.setVisible(false)
+      this.tipText.setText('Saved game is unavailable\nClick START or press SPACE')
+      this.tipText.setY(370)
+      return
+    }
+
+    this.savedGame = saveData
+    this.startGame()
+    this.restoreSavedGame(saveData)
+  }
+
+  private restoreSavedGame(saveData: LevelOneSaveData) {
+    this.score = saveData.score
+    this.health = saveData.health
+    this.coinCount = saveData.coins
+    this.levelCompleted = saveData.levelCompleted
+    this.heartIntroduced = saveData.heartIntroduced
+    this.levelOneCoinDropTarget = saveData.coinProgress.dropTarget
+    this.levelOneCoinsDropped = saveData.coinProgress.dropped
+    this.levelOneEnemyDefeats = saveData.coinProgress.enemyDefeats
+    this.levelOneCoinDropDefeatTargets = [...saveData.coinProgress.defeatTargets]
+
+    this.scoreText.setText(`Score: ${this.score}`)
+    this.updateHealthDisplay()
+    this.updateCoinDisplay()
+
+    if (saveData.area === 'townRoad') {
+      this.restoreCompletedLevelOneState()
+      this.enterTownRoad()
+      return
+    }
+
+    if (saveData.levelCompleted || saveData.stage === 'clear') {
+      this.restoreCompletedLevelOneState()
+      this.restoreCompletedDustyOutskirts()
+      return
+    }
+
+    this.restoreLevelOneCheckpoint(saveData.stage, saveData.heartIntroduced)
+  }
+
+  private restoreLevelOneCheckpoint(stage: Exclude<LevelOneSaveStage, 'clear'>, heartIntroduced: boolean) {
+    const checkpoint = {
+      intro: { wave: 1, enemies: LEVEL_ONE_CONFIG.initialEnemies, item: null },
+      heart: { wave: 2, enemies: LEVEL_ONE_CONFIG.heartEnemies, item: 'heart' },
+      coffee: { wave: heartIntroduced ? 3 : 2, enemies: LEVEL_ONE_CONFIG.coffeeEnemies, item: 'coffee' },
+      shield: { wave: heartIntroduced ? 4 : 3, enemies: LEVEL_ONE_CONFIG.shieldEnemies, item: 'shield' },
+      final: { wave: heartIntroduced ? 5 : 4, enemies: LEVEL_ONE_CONFIG.finalEnemies, item: null },
+    }[stage] as { wave: number; enemies: number; item: PickupType | null }
+
+    this.currentArea = 'dustyOutskirts'
+    this.levelCompleted = false
+    this.wave = checkpoint.wave
+    this.enemiesToSpawn = checkpoint.enemies
+    this.enemiesSpawned = 0
+    this.enemiesCleared = 0
+    this.isLevelClear = false
+    this.hasTakenDamage = stage === 'heart'
+    this.currentWaveItem = checkpoint.item
+    this.itemSpawnedThisWave = false
+    this.heartIntroduced = stage === 'heart' ? false : heartIntroduced
+    this.coffeeIntroduced = stage === 'shield' || stage === 'final'
+    this.shieldIntroduced = stage === 'final'
+    this.finalPressureWaveDone = stage === 'final'
+    this.levelStartTime = this.time.now
+    this.lastSpawnTime = 0
+
+    this.player.setPosition(GAME_WIDTH / 2, GAME_HEIGHT / 2)
+    this.waveText.setText(`Wave: ${this.wave}`)
+  }
+
+  private restoreCompletedLevelOneState() {
+    this.levelCompleted = true
+    this.isLevelClear = true
+    this.currentWaveItem = null
+    this.itemSpawnedThisWave = false
+    this.coffeeIntroduced = true
+    this.shieldIntroduced = true
+    this.finalPressureWaveDone = true
+  }
+
+  private restoreCompletedDustyOutskirts() {
+    this.currentArea = 'dustyOutskirts'
+    this.player.setPosition(GAME_WIDTH / 2, GAME_HEIGHT / 2)
+    this.waveText.setText('Area: Dusty Outskirts')
+    this.showLevelCompleteText()
+    this.unlockAreaExit()
   }
 
   private endGame() {
@@ -1349,6 +1500,7 @@ class MainScene extends Phaser.Scene {
 
   private finishLevelOne() {
     this.clearItems()
+    this.levelCompleted = true
     this.currentWaveItem = null
     this.itemSpawnedThisWave = false
     this.isLevelClear = true
@@ -1383,6 +1535,7 @@ class MainScene extends Phaser.Scene {
 
     this.currentWaveItem = null
     this.itemSpawnedThisWave = false
+    this.levelCompleted = true
     this.finalPressureWaveDone = true
     this.isLevelClear = true
 
@@ -1502,6 +1655,7 @@ class MainScene extends Phaser.Scene {
 
   private enterTownRoad() {
     this.currentArea = 'townRoad'
+    this.levelCompleted = true
     this.isAreaExitOpen = false
     this.isLevelClear = true
     this.currentWaveItem = null
@@ -1530,6 +1684,7 @@ class MainScene extends Phaser.Scene {
 
   private enterDustyOutskirtsFromTownRoad() {
     this.currentArea = 'dustyOutskirts'
+    this.levelCompleted = true
     this.isLevelClear = true
     this.currentWaveItem = null
     this.itemSpawnedThisWave = false

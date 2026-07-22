@@ -51,6 +51,7 @@ https://lingmeng-658.github.io/pixel-outlaw/
 ## 当前核心玩法
 
 - 标题页 Start Game
+- 合法存档存在时可从标题页 Continue Saved Game
 - WASD 移动
 - 方向键八方向射击
 - 敌人从边缘生成并追踪玩家
@@ -109,7 +110,7 @@ https://lingmeng-658.github.io/pixel-outlaw/
 - R Restart Level
 - S Save Progress & Quit
 
-当前 Save Progress 只保存第一关内置阶段进度，不保存完整战场快照。
+存档采用阶段起点检查点恢复：保存分数、生命、金币、区域、通关状态和第一关阶段；Continue 后从对应阶段的稳定起点继续，不恢复敌人、子弹、地面道具、玩家精确位置或限时道具的剩余时间。
 
 localStorage key：
 
