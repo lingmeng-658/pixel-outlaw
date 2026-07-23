@@ -43,6 +43,7 @@ https://lingmeng-658.github.io/pixel-outlaw/
 - `src/encounter.ts`：第二关连续遭遇调度器，负责批次激活、动态上限、待生成队列和完成判定。
 - `src/townRoadFlow.ts`：Town Road 入口流程控制，集中管理准备、开战、完成、离区状态，以及战斗触发线和南侧返回提示的生命周期。
 - `src/contestedPickup.ts`：第二关道具争夺控制，集中管理计划、落地警告、争夺道具、主要抢夺者、有限拦截窗口和拾取清理。
+- `src/levelLifecycle.ts`：可复用关卡生命周期的纯数据边界，定义运行进度、入口检查点和场景启动意图，并提供创建与克隆 helper。
 - `src/types.ts`：道具、敌人、区域和存档阶段类型。
 - `src/save.ts`：version 3 存档结构、运行时校验及 version 1 / 2 迁移。
 - `src/textures.ts`：临时像素纹理创建逻辑。
@@ -51,6 +52,17 @@ https://lingmeng-658.github.io/pixel-outlaw/
 - `.github/workflows/deploy.yml`：GitHub Pages 自动部署工作流。
 
 当前重构原则：先保持玩法稳定，只把边界清晰、低风险的代码拆出去，不一次性大拆 UI、战斗和关卡控制。
+
+## 通用关卡生命周期
+
+关卡生命周期明确分为四类状态：
+
+- 运行进度：分数、金币、生命、最大生命和 `completedThrough`，可跨关卡并进入存档或检查点。
+- 关卡入口检查点：进入当前未完成关卡前的运行进度快照，只保存纯数据，不保存敌人、坐标、Timer、Tween 或场景对象。
+- 当前关卡运行时：遭遇、敌人、子弹、道具、控制器引用和临时强化，由每关自己的 reset / enter 适配负责重建。
+- 纯视觉状态：标题、完成文字和入口提示；视觉清理不得修改运行进度或关卡运行时。
+
+Restart、New Game、Save & Quit 和 Continue 使用同一套外层编排。第一关使用初始入口检查点；第二关首次进入未完成 Town Road 时捕获通用入口检查点，完成后与重新进入时不覆盖它。未来第三关只需捕获 `level: 3` 检查点并增加自己的运行时 reset / enter 适配，即可在 Restart 时保留 `completedThrough: 2` 及之前的合法奖励。
 
 ## ChatGPT / Codex 协作闭环
 

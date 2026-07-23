@@ -9,6 +9,14 @@ import {
   TIMING,
 } from './constants'
 import { ContestedPickupController } from './contestedPickup'
+import {
+  cloneLevelCheckpoint,
+  createInitialLevelCheckpoint,
+  createLevelEntryCheckpoint,
+  type LevelEntryCheckpoint,
+  type RunProgress,
+  type SceneStartData,
+} from './levelLifecycle'
 import { LEVEL_ONE_CONFIG } from './levelOne'
 import { ContinuousEncounter } from './encounter'
 import { LEVEL_TWO_CONFIG, LEVEL_TWO_TOTAL_ENEMIES } from './levelTwo'
@@ -108,7 +116,7 @@ class MainScene extends Phaser.Scene {
   private townRoadFlow = new TownRoadFlow(this)
   private levelTwoDefeats = 0
   private contestedPickupFlow = new ContestedPickupController(this, {
-    getEnemies: () => this.enemies.getChildren().map((child) => child as Phaser.Physics.Arcade.Sprite),
+    getEnemies: () => this.enemies?.getChildren().map((child) => child as Phaser.Physics.Arcade.Sprite) ?? [],
     getPlayer: () => this.player,
     spawnPickup: (type, label, x, y) => this.spawnPickupSprite(type, type, label, x, y, true),
     applyEnemyPickup: (enemy, type) => this.applyEnemyPickup(enemy, type),
@@ -128,14 +136,15 @@ class MainScene extends Phaser.Scene {
   private finalGunslingersSpawned = 0
   private chargerIntroducedThisRun = false
   private gunslingerIntroducedThisRun = false
-  private townCheckpoint = { score: 0, health: MAX_HEALTH, coins: 0, maxHealth: MAX_HEALTH }
+  private currentLevelCheckpoint = createInitialLevelCheckpoint()
 
   constructor() {
     super('MainScene')
   }
 
-  create(data?: { autoStart?: boolean; townCheckpoint?: { score: number; health: number; coins: number; maxHealth: number } }) {
-    this.resetGameState()
+  create(data?: SceneStartData) {
+    const startData: SceneStartData = data ?? { mode: 'title' }
+    this.resetRunState()
     this.savedGame = loadLevelOneSaveData()
     createTextures(this)
 
@@ -304,7 +313,7 @@ class MainScene extends Phaser.Scene {
     this.keys = this.input.keyboard.addKeys('W,A,S,D,UP,DOWN,LEFT,RIGHT,SPACE,C,R,ESC,K,L') as Record<string, Phaser.Input.Keyboard.Key>
 
     this.startText.on('pointerdown', () => {
-      this.startGame()
+      this.startNewRun()
     })
 
     this.continueText?.on('pointerdown', () => {
@@ -370,19 +379,11 @@ class MainScene extends Phaser.Scene {
       this.damagePlayer(this.time.now)
     })
 
-    if (data?.autoStart) {
+    if (startData.mode === 'newRun') {
       this.startGame()
-      if (data.townCheckpoint) {
-        this.score = data.townCheckpoint.score
-        this.health = data.townCheckpoint.health
-        this.coinCount = data.townCheckpoint.coins
-        this.maxHealth = data.townCheckpoint.maxHealth
-        this.restoreCompletedLevelOneState()
-        this.scoreText.setText(`Score: ${this.score}`)
-        this.updateCoinDisplay()
-        this.rebuildHealthDisplay()
-        this.enterTownRoad()
-      }
+    } else if (startData.mode === 'restartLevel') {
+      this.startGame()
+      this.restoreLevelCheckpoint(startData.checkpoint)
     }
   }
 
@@ -467,25 +468,6 @@ class MainScene extends Phaser.Scene {
     this.tweens.killTweensOf(this.levelCompleteText)
     this.levelCompleteText.destroy()
     this.levelCompleteText = undefined
-    this.levelTwoEncounter.reset()
-    this.levelTwoCompleted = false
-    this.levelTwoDefeats = 0
-    this.contestedPickupFlow.reset()
-    this.weaponMode = null
-    this.weaponModeUntil = 0
-    this.dynamiteCharges = 0
-    this.shotActionId = 0
-    this.explosiveActions.clear()
-    this.adaptiveSecondBusy = false
-    this.heartDropReadyAt = 0
-    this.heartDropKillsRemaining = 0
-    this.mercyDropAttempts = 0
-    this.mercyArmed = false
-    this.levelTwoShieldSpawned = false
-    this.finalGunslingersSpawned = 0
-    this.chargerIntroducedThisRun = false
-    this.gunslingerIntroducedThisRun = false
-    this.townCheckpoint = { score: 0, health: MAX_HEALTH, coins: 0, maxHealth: MAX_HEALTH }
   }
 
   private drawDustyOutskirtsBackground() {
@@ -576,13 +558,15 @@ class MainScene extends Phaser.Scene {
     ]
   }
 
-  private resetGameState() {
+  private resetRunState() {
     this.score = 0
     this.coinCount = 0
     this.health = MAX_HEALTH
+    this.maxHealth = MAX_HEALTH
     this.isStarted = false
     this.isGameOver = false
     this.levelCompleted = false
+    this.levelTwoCompleted = false
     this.isPaused = false
     this.pauseStartedAt = 0
     this.continueText = undefined
@@ -628,6 +612,25 @@ class MainScene extends Phaser.Scene {
     this.shieldUntil = 0
     this.shieldAura = undefined
 
+    this.levelTwoEncounter.reset()
+    this.levelTwoDefeats = 0
+    this.contestedPickupFlow.reset()
+    this.weaponMode = null
+    this.weaponModeUntil = 0
+    this.dynamiteCharges = 0
+    this.shotActionId = 0
+    this.explosiveActions.clear()
+    this.adaptiveSecondBusy = false
+    this.heartDropReadyAt = 0
+    this.heartDropKillsRemaining = 0
+    this.mercyDropAttempts = 0
+    this.mercyArmed = false
+    this.levelTwoShieldSpawned = false
+    this.finalGunslingersSpawned = 0
+    this.chargerIntroducedThisRun = false
+    this.gunslingerIntroducedThisRun = false
+    this.currentLevelCheckpoint = createInitialLevelCheckpoint()
+
     this.currentArea = 'dustyOutskirts'
     this.isAreaExitOpen = false
     this.isAreaTransitioning = false
@@ -641,7 +644,7 @@ class MainScene extends Phaser.Scene {
 
   private handleStartInput() {
     if (Phaser.Input.Keyboard.JustDown(this.keys.SPACE)) {
-      this.startGame()
+      this.startNewRun()
       return
     }
 
@@ -774,28 +777,86 @@ class MainScene extends Phaser.Scene {
     this.pauseText.setVisible(false)
   }
 
-  private restartCurrentLevel() {
-    this.prepareSceneChangeFromPause()
-    if (this.currentArea === 'townRoad') {
-      this.scene.restart({ autoStart: true, townCheckpoint: this.townCheckpoint })
-    } else {
-      this.scene.restart({ autoStart: true })
+  private captureRunProgress(): RunProgress {
+    return {
+      score: this.score,
+      coins: this.coinCount,
+      health: this.health,
+      maxHealth: this.maxHealth,
+      progression: {
+        completedThrough: this.levelTwoCompleted ? 2 : this.levelCompleted ? 1 : 0,
+      },
     }
   }
 
+  private applyRunProgress(progress: RunProgress) {
+    this.score = progress.score
+    this.coinCount = progress.coins
+    this.health = progress.health
+    this.maxHealth = progress.maxHealth
+    this.levelCompleted = progress.progression.completedThrough >= 1
+    this.levelTwoCompleted = progress.progression.completedThrough >= 2
+  }
+
+  private captureLevelCheckpoint(level: number, area: AreaId) {
+    this.currentLevelCheckpoint = createLevelEntryCheckpoint(level, area, this.captureRunProgress())
+  }
+
+  private getRestartCheckpoint() {
+    if (this.currentArea === 'townRoad' && this.currentLevelCheckpoint.area === 'townRoad') {
+      return this.currentLevelCheckpoint
+    }
+    return createInitialLevelCheckpoint()
+  }
+
+  private getProgressForSave() {
+    const isUnfinishedCurrentLevel = this.currentArea === 'townRoad' && !this.levelTwoCompleted
+    if (isUnfinishedCurrentLevel) return this.currentLevelCheckpoint.progress
+    if (!this.levelCompleted) return createInitialLevelCheckpoint().progress
+    return this.captureRunProgress()
+  }
+
+  private restoreLevelCheckpoint(checkpoint: LevelEntryCheckpoint) {
+    this.currentLevelCheckpoint = cloneLevelCheckpoint(checkpoint)
+    this.applyRunProgress(checkpoint.progress)
+    this.scoreText.setText(`Score: ${this.score}`)
+    this.updateCoinDisplay()
+    this.rebuildHealthDisplay()
+    this.enterLevelFromCheckpoint(checkpoint)
+  }
+
+  private enterLevelFromCheckpoint(checkpoint: LevelEntryCheckpoint) {
+    if (checkpoint.level === 1 && checkpoint.area === 'dustyOutskirts') {
+      return
+    }
+    if (checkpoint.level === 2 && checkpoint.area === 'townRoad') {
+      this.restoreCompletedLevelOneState()
+      this.enterTownRoad(false)
+    }
+  }
+
+  private restartCurrentLevel() {
+    if (this.isPaused) this.prepareSceneChangeFromPause()
+    const checkpoint = this.getRestartCheckpoint()
+    this.scene.restart({
+      mode: 'restartLevel',
+      checkpoint: cloneLevelCheckpoint(checkpoint),
+    } satisfies SceneStartData)
+  }
+
   private saveAndQuit() {
-    const isCompletedSave = this.levelCompleted
+    const runProgress = this.getProgressForSave()
     const saveData = createLevelOneSaveData({
-      area: isCompletedSave ? this.currentArea : 'dustyOutskirts',
-      levelCompleted: isCompletedSave,
-      levelTwoCompleted: isCompletedSave && this.levelTwoCompleted,
-      stage: isCompletedSave ? 'clear' : 'intro',
-      score: isCompletedSave ? this.score : 0,
-      health: isCompletedSave ? this.health : MAX_HEALTH,
-      maxHealth: isCompletedSave ? this.maxHealth : MAX_HEALTH,
-      coins: isCompletedSave ? this.coinCount : 0,
+      area: runProgress.progression.completedThrough >= 1 ? this.currentArea : 'dustyOutskirts',
+      levelCompleted: runProgress.progression.completedThrough >= 1,
+      levelTwoCompleted: runProgress.progression.completedThrough >= 2,
+      stage: runProgress.progression.completedThrough >= 1 ? 'clear' : 'intro',
+      score: runProgress.score,
+      health: runProgress.health,
+      maxHealth: runProgress.maxHealth,
+      coins: runProgress.coins,
       heartIntroduced: false,
-      coinProgress: isCompletedSave
+      coinProgress: runProgress.progression.completedThrough >= 1
         ? {
             dropTarget: this.levelOneCoinDropTarget,
             dropped: this.levelOneCoinsDropped,
@@ -808,6 +869,7 @@ class MainScene extends Phaser.Scene {
             enemyDefeats: 0,
             defeatTargets: [],
           },
+      levelCheckpoint: cloneLevelCheckpoint(this.currentLevelCheckpoint),
     })
 
     try {
@@ -818,14 +880,18 @@ class MainScene extends Phaser.Scene {
     }
 
     this.prepareSceneChangeFromPause()
-    this.scene.restart()
+    this.scene.restart({ mode: 'title' } satisfies SceneStartData)
   }
 
   private handleRestartInput() {
     if (Phaser.Input.Keyboard.JustDown(this.keys.R)) {
-      if (this.currentArea === 'townRoad') this.scene.restart({ autoStart: true, townCheckpoint: this.townCheckpoint })
-      else this.scene.restart()
+      this.restartCurrentLevel()
     }
+  }
+
+  private startNewRun() {
+    if (this.isStarted) return
+    this.scene.restart({ mode: 'newRun', autoStart: true } satisfies SceneStartData)
   }
 
   private startGame() {
@@ -860,16 +926,23 @@ class MainScene extends Phaser.Scene {
   }
 
   private restoreSavedGame(saveData: LevelOneSaveData) {
+    this.currentLevelCheckpoint = saveData.levelCheckpoint
+      ? cloneLevelCheckpoint(saveData.levelCheckpoint)
+      : this.deriveLegacyCheckpoint(saveData)
+
     if (!saveData.levelCompleted) {
       return
     }
 
-    this.score = saveData.score
-    this.health = saveData.health
-    this.maxHealth = saveData.maxHealth
-    this.coinCount = saveData.coins
-    this.levelCompleted = saveData.levelCompleted
-    this.levelTwoCompleted = saveData.levelTwoCompleted
+    this.applyRunProgress({
+      score: saveData.score,
+      coins: saveData.coins,
+      health: saveData.health,
+      maxHealth: saveData.maxHealth,
+      progression: {
+        completedThrough: saveData.levelTwoCompleted ? 2 : saveData.levelCompleted ? 1 : 0,
+      },
+    })
     this.heartIntroduced = saveData.heartIntroduced
     this.levelOneCoinDropTarget = saveData.coinProgress.dropTarget
     this.levelOneCoinsDropped = saveData.coinProgress.dropped
@@ -883,11 +956,30 @@ class MainScene extends Phaser.Scene {
     this.restoreCompletedLevelOneState()
 
     if (saveData.area === 'townRoad') {
-      this.enterTownRoad()
+      this.enterTownRoad(false)
       return
     }
 
     this.restoreCompletedDustyOutskirts()
+  }
+
+  private deriveLegacyCheckpoint(saveData: LevelOneSaveData) {
+    if (saveData.area !== 'townRoad' && !saveData.levelTwoCompleted) {
+      return createInitialLevelCheckpoint()
+    }
+
+    const maxHealth = Math.max(MAX_HEALTH, saveData.maxHealth - (saveData.levelTwoCompleted
+      ? LEVEL_TWO_CONFIG.completionRewardHealth
+      : 0))
+    return createLevelEntryCheckpoint(2, 'townRoad', {
+      score: saveData.score,
+      coins: saveData.coins,
+      health: Math.min(saveData.health, maxHealth),
+      maxHealth,
+      progression: {
+        completedThrough: 1,
+      },
+    })
   }
 
   private restoreCompletedLevelOneState() {
@@ -1916,9 +2008,12 @@ class MainScene extends Phaser.Scene {
     })
   }
 
-  private enterTownRoad() {
-    if (this.currentArea !== 'townRoad') {
-      this.townCheckpoint = { score: this.score, health: this.health, coins: this.coinCount, maxHealth: this.maxHealth }
+  private enterTownRoad(captureCheckpoint = true) {
+    if (captureCheckpoint
+      && this.currentArea !== 'townRoad'
+      && !this.levelTwoCompleted
+      && this.currentLevelCheckpoint.area !== 'townRoad') {
+      this.captureLevelCheckpoint(2, 'townRoad')
     }
     this.currentArea = 'townRoad'
     this.levelCompleted = true

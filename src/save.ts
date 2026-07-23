@@ -1,4 +1,5 @@
 import { MAX_HEALTH } from './constants'
+import type { LevelEntryCheckpoint } from './levelLifecycle'
 import type { AreaId, LevelOneSaveStage } from './types'
 
 export const SAVE_KEY = 'pixel-outlaw-save'
@@ -24,6 +25,7 @@ export type LevelOneSaveData = {
   coins: number
   heartIntroduced: boolean
   coinProgress: LevelOneCoinProgress
+  levelCheckpoint?: LevelEntryCheckpoint
 }
 
 type CreateLevelOneSaveDataInput = Omit<LevelOneSaveData, 'version' | 'savedAt' | 'level'>
@@ -76,6 +78,21 @@ function isValidCoinProgress(value: unknown): value is LevelOneCoinProgress {
     && defeatTargets.every((target, index) => index === 0 || target > defeatTargets[index - 1])
 }
 
+function isValidLevelCheckpoint(value: unknown): value is LevelEntryCheckpoint {
+  if (!isRecord(value) || !Number.isInteger(value.level) || (value.level as number) < 1) return false
+  if (!isAreaId(value.area) || !isRecord(value.progress)) return false
+  const { score, coins, health, maxHealth, progression } = value.progress
+  if (!isNonNegativeInteger(score) || !isNonNegativeInteger(coins)) return false
+  if (!Number.isInteger(maxHealth) || (maxHealth as number) < MAX_HEALTH || (maxHealth as number) > MAX_HEALTH + 1) return false
+  if (!Number.isInteger(health) || (health as number) < 1 || (health as number) > (maxHealth as number)) return false
+  if (!isRecord(progression)
+    || !Number.isInteger(progression.completedThrough)
+    || (progression.completedThrough as number) < 0) return false
+  if ((progression.completedThrough as number) !== (value.level as number) - 1) return false
+  return (value.level !== 1 || value.area === 'dustyOutskirts')
+    && (value.level !== 2 || value.area === 'townRoad')
+}
+
 function hasSharedSaveFields(value: Record<string, unknown>) {
   return typeof value.savedAt === 'string'
     && isAreaId(value.area)
@@ -96,6 +113,7 @@ function isVersionThreeSaveData(value: unknown): value is LevelOneSaveData {
   if (!Number.isInteger(value.maxHealth) || (value.maxHealth as number) < MAX_HEALTH || (value.maxHealth as number) > MAX_HEALTH + 1) return false
   if (!Number.isInteger(value.health) || (value.health as number) < 1 || (value.health as number) > (value.maxHealth as number)) return false
   if (value.levelTwoCompleted && (!value.levelCompleted || value.maxHealth !== MAX_HEALTH + 1)) return false
+  if (value.levelCheckpoint !== undefined && !isValidLevelCheckpoint(value.levelCheckpoint)) return false
   return value.level === (value.area === 'townRoad' ? 2 : 1)
 }
 
