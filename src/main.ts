@@ -891,7 +891,7 @@ class MainScene extends Phaser.Scene {
 
   private startNewRun() {
     if (this.isStarted) return
-    this.scene.restart({ mode: 'newRun', autoStart: true } satisfies SceneStartData)
+    this.startGame()
   }
 
   private startGame() {
