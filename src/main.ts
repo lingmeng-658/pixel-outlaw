@@ -109,6 +109,7 @@ class MainScene extends Phaser.Scene {
   private contestedPickup?: Phaser.Physics.Arcade.Sprite
   private primaryContender?: Phaser.Physics.Arcade.Sprite
   private contenderEnabledAt = 0
+  private contenderInterceptUntil = 0
   private weaponMode: GunslingerUpgrade | null = null
   private weaponModeUntil = 0
   private dynamiteCharges = 0
@@ -470,6 +471,7 @@ class MainScene extends Phaser.Scene {
     this.contestedPickup = undefined
     this.primaryContender = undefined
     this.contenderEnabledAt = 0
+    this.contenderInterceptUntil = 0
     this.weaponMode = null
     this.weaponModeUntil = 0
     this.dynamiteCharges = 0
@@ -2499,6 +2501,7 @@ class MainScene extends Phaser.Scene {
     const candidates = this.getEligibleContenders(type)
     if (candidates.length === 0) return
     this.primaryContender = Phaser.Utils.Array.GetRandom(candidates)
+    this.contenderInterceptUntil = this.time.now + LEVEL_TWO_CONFIG.contestedPickup.gunslingerInterceptMs
     const marker = this.add.text(this.primaryContender.x, this.primaryContender.y - 46, '!', {
       fontFamily: 'monospace', fontSize: '24px', color: '#ffdf64', stroke: '#2b1d16', strokeThickness: 4,
     }).setOrigin(0.5).setDepth(10)
@@ -2525,18 +2528,15 @@ class MainScene extends Phaser.Scene {
     const isPrimary = enemy === this.primaryContender
     if (!isPrimary && distance > 52) return false
 
-    if (isPrimary && enemy.getData('kind') === 'gunslinger') {
-      const playerDistance = Phaser.Math.Distance.Between(this.player.x, this.player.y, pickup.x, pickup.y)
-      if (playerDistance < 150 && distance > LEVEL_TWO_CONFIG.contestedPickup.pickupDistance) {
-        const blockTarget = {
-          x: (this.player.x + pickup.x) / 2,
-          y: (this.player.y + pickup.y) / 2,
-        }
-        this.physics.moveTo(enemy, blockTarget.x, blockTarget.y, LEVEL_TWO_CONFIG.enemy.gunslinger.speed)
-        const nextAttack = (enemy.getData('nextAttack') as number | undefined) ?? time
-        if (!enemy.getData('busy') && time >= nextAttack) this.startGunslingerAttack(enemy, time)
-        return true
+    if (this.shouldGunslingerInterceptPickup(enemy, pickup, distance, isPrimary, time)) {
+      const blockTarget = {
+        x: (this.player.x + pickup.x) / 2,
+        y: (this.player.y + pickup.y) / 2,
       }
+      this.physics.moveTo(enemy, blockTarget.x, blockTarget.y, LEVEL_TWO_CONFIG.enemy.gunslinger.speed)
+      const nextAttack = (enemy.getData('nextAttack') as number | undefined) ?? time
+      if (!enemy.getData('busy') && time >= nextAttack) this.startGunslingerAttack(enemy, time)
+      return true
     }
 
     if (distance <= LEVEL_TWO_CONFIG.contestedPickup.pickupDistance) {
@@ -2558,6 +2558,19 @@ class MainScene extends Phaser.Scene {
     return true
   }
 
+  private shouldGunslingerInterceptPickup(
+    enemy: Phaser.Physics.Arcade.Sprite,
+    pickup: Phaser.Physics.Arcade.Sprite,
+    enemyDistance: number,
+    isPrimary: boolean,
+    time: number,
+  ) {
+    if (!isPrimary || enemy.getData('kind') !== 'gunslinger' || time >= this.contenderInterceptUntil) return false
+    const playerDistance = Phaser.Math.Distance.Between(this.player.x, this.player.y, pickup.x, pickup.y)
+    return playerDistance < LEVEL_TWO_CONFIG.contestedPickup.minPlayerDistance
+      && enemyDistance > LEVEL_TWO_CONFIG.contestedPickup.pickupDistance
+  }
+
   private clearContestedPickupState() {
     if (this.primaryContender?.active) {
       const marker = this.primaryContender.getData('contenderMarker') as Phaser.GameObjects.Text | undefined
@@ -2566,6 +2579,7 @@ class MainScene extends Phaser.Scene {
     }
     this.primaryContender = undefined
     this.contestedPickup = undefined
+    this.contenderInterceptUntil = 0
   }
 
   private applyEnemyPickup(enemy: Phaser.Physics.Arcade.Sprite, type: ContestedPickupType) {

@@ -69,7 +69,8 @@ export const LEVEL_TWO_CONFIG = {
   contestedPickup: {
     landingWarningMs: 650,
     reactionDelayMs: 450,
-    enemyPickupHoldMs: 480,
+    gunslingerInterceptMs: 700,
+    enemyPickupHoldMs: 320,
     pickupDistance: 25,
     minPlayerDistance: 150,
     edgePadding: 130,
