@@ -41,6 +41,7 @@ https://lingmeng-658.github.io/pixel-outlaw/
 - `src/levelOne.ts`：第一关各阶段敌人数量配置。
 - `src/levelTwo.ts`：第二关隐藏批次、敌人、强化、掉落与奖励配置。
 - `src/encounter.ts`：第二关连续遭遇调度器，负责批次激活、动态上限、待生成队列和完成判定。
+- `src/townRoadFlow.ts`：Town Road 入口流程控制，集中管理准备、开战、完成、离区状态，以及战斗触发线和南侧返回提示的生命周期。
 - `src/types.ts`：道具、敌人、区域和存档阶段类型。
 - `src/save.ts`：version 3 存档结构、运行时校验及 version 1 / 2 迁移。
 - `src/textures.ts`：临时像素纹理创建逻辑。
@@ -176,6 +177,12 @@ pixel-outlaw-save
 ```
 
 ## 已完成的整理
+
+### 2026-07-23 第二关流程控制拆分
+
+- 新增 `src/townRoadFlow.ts`，统一持有 Town Road 是否开战、南侧入口是否开放，以及两组相关视觉对象。
+- `MainScene` 通过准备、越线开战、完成和离区等语义方法驱动入口流程，继续负责遭遇调度、区域切换、完成奖励、存档和浮动提示。
+- 本轮仅调整职责边界；第二关坐标、敌人参数、画面、玩法和存档语义保持不变。
 
 ### 2026-06-26 重构收尾
 
