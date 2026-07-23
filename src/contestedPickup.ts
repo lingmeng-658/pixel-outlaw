@@ -261,8 +261,15 @@ export class ContestedPickupController {
   }
 
   private clearPickupHolds() {
-    this.hooks.getEnemies().forEach((enemy) => {
-      enemy.setData('pickupHoldUntil', undefined)
+    let enemies: Phaser.Physics.Arcade.Sprite[]
+    try {
+      enemies = this.hooks.getEnemies()
+    } catch {
+      return
+    }
+
+    enemies.forEach((enemy) => {
+      if (enemy.active) enemy.setData('pickupHoldUntil', undefined)
     })
   }
 }
