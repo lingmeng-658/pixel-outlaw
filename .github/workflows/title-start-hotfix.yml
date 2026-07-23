@@ -1,16 +1,15 @@
 name: One-off title start hotfix
 
 on:
-  issues:
-    types:
-      - opened
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
   apply-hotfix:
-    if: github.event.issue.title == 'run-title-start-hotfix'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
