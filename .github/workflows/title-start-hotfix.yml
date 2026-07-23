@@ -1,18 +1,16 @@
 name: One-off title start hotfix
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - .github/workflows/title-start-hotfix.yml
+  issues:
+    types:
+      - opened
 
 permissions:
   contents: write
 
 jobs:
   apply-hotfix:
-    if: github.actor != 'github-actions[bot]'
+    if: github.event.issue.title == 'run-title-start-hotfix'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
