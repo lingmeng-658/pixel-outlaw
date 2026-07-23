@@ -299,7 +299,7 @@ class MainScene extends Phaser.Scene {
       throw new Error('Keyboard input is not available')
     }
 
-    this.keys = this.input.keyboard.addKeys('W,A,S,D,UP,DOWN,LEFT,RIGHT,SPACE,C,R,ESC,K') as Record<string, Phaser.Input.Keyboard.Key>
+    this.keys = this.input.keyboard.addKeys('W,A,S,D,UP,DOWN,LEFT,RIGHT,SPACE,C,R,ESC,K,L') as Record<string, Phaser.Input.Keyboard.Key>
 
     this.startText.on('pointerdown', () => {
       this.startGame()
@@ -665,6 +665,23 @@ class MainScene extends Phaser.Scene {
 
       this.debugOpenDustyOutskirtsExit()
     }
+
+    if (Phaser.Input.Keyboard.JustDown(this.keys.L)) {
+      this.debugCompleteTownRoad()
+    }
+  }
+
+  private debugCompleteTownRoad() {
+    if (!this.isStarted || this.currentArea !== 'townRoad' || this.levelTwoCompleted) return
+    if (this.isAreaTransitioning || this.isGameOver) return
+
+    this.clearEnemies()
+    this.bullets.clear(true, true)
+    this.enemyBullets.clear(true, true)
+    this.clearItems()
+    this.clearCoinPickups()
+    this.completeLevelTwo()
+    this.showFloatingText(GAME_WIDTH / 2, 160, 'DEBUG TOWN ROAD CLEAR')
   }
 
   private handleTownRoadInput() {
@@ -2438,16 +2455,22 @@ class MainScene extends Phaser.Scene {
     }
 
     if (this.levelTwoEncounter.isComplete(this.enemies.countActive(true))) {
-      this.levelTwoCompleted = true
-      this.levelTwoEncounter.stop()
-      this.enemyBullets.clear(true, true)
-      this.clearItems()
-      this.townRoadFlow.completeCombat()
-      this.maxHealth += LEVEL_TWO_CONFIG.completionRewardHealth
-      this.health = Math.min(this.maxHealth, this.health + LEVEL_TWO_CONFIG.completionRewardHealth)
-      this.rebuildHealthDisplay()
-      this.showAreaTitle('TOWN ROAD CLEAR', 'The road is safe... for now')
+      this.completeLevelTwo()
     }
+  }
+
+  private completeLevelTwo() {
+    if (this.levelTwoCompleted) return
+
+    this.levelTwoCompleted = true
+    this.levelTwoEncounter.stop()
+    this.enemyBullets.clear(true, true)
+    this.clearItems()
+    this.townRoadFlow.completeCombat()
+    this.maxHealth += LEVEL_TWO_CONFIG.completionRewardHealth
+    this.health = Math.min(this.maxHealth, this.health + LEVEL_TWO_CONFIG.completionRewardHealth)
+    this.rebuildHealthDisplay()
+    this.showAreaTitle('TOWN ROAD CLEAR', 'The road is safe... for now')
   }
 
   private updateContestedPickupPlan(time: number) {
