@@ -103,6 +103,14 @@ npm run dev
 
 并列出人工试玩清单。
 
+### Phaser + Playwright 浏览器验收
+
+- `playwright-cli` 键名区分大小写。
+- Phaser `JustDown` 按键不要使用快速 `press`。
+- 键盘操作统一使用 `keydown` → 等待约 200ms → `keyup`。
+- 实时战斗中不要长时间等待截图，应尽快暂停游戏。
+- 截图与临时测试产物放在 `/tmp`，不要提交到仓库。
+
 ---
 
 ## 6. 任务结束交接
