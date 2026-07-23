@@ -8,6 +8,7 @@ import {
   PLAYER_SPEED,
   TIMING,
 } from './constants'
+import { ContestedPickupController } from './contestedPickup'
 import { LEVEL_ONE_CONFIG } from './levelOne'
 import { ContinuousEncounter } from './encounter'
 import { LEVEL_TWO_CONFIG, LEVEL_TWO_TOTAL_ENEMIES } from './levelTwo'
@@ -106,12 +107,13 @@ class MainScene extends Phaser.Scene {
   private levelTwoCompleted = false
   private townRoadFlow = new TownRoadFlow(this)
   private levelTwoDefeats = 0
-  private nextLevelTwoPickup = 0
-  private pendingContestedPickup = false
-  private contestedPickup?: Phaser.Physics.Arcade.Sprite
-  private primaryContender?: Phaser.Physics.Arcade.Sprite
-  private contenderEnabledAt = 0
-  private contenderInterceptUntil = 0
+  private contestedPickupFlow = new ContestedPickupController(this, {
+    getEnemies: () => this.enemies.getChildren().map((child) => child as Phaser.Physics.Arcade.Sprite),
+    getPlayer: () => this.player,
+    spawnPickup: (type, label, x, y) => this.spawnPickupSprite(type, type, label, x, y, true),
+    applyEnemyPickup: (enemy, type) => this.applyEnemyPickup(enemy, type),
+    startGunslingerAttack: (enemy, time) => this.startGunslingerAttack(enemy, time),
+  })
   private weaponMode: GunslingerUpgrade | null = null
   private weaponModeUntil = 0
   private dynamiteCharges = 0
@@ -468,12 +470,7 @@ class MainScene extends Phaser.Scene {
     this.levelTwoEncounter.reset()
     this.levelTwoCompleted = false
     this.levelTwoDefeats = 0
-    this.nextLevelTwoPickup = 0
-    this.pendingContestedPickup = false
-    this.contestedPickup = undefined
-    this.primaryContender = undefined
-    this.contenderEnabledAt = 0
-    this.contenderInterceptUntil = 0
+    this.contestedPickupFlow.reset()
     this.weaponMode = null
     this.weaponModeUntil = 0
     this.dynamiteCharges = 0
@@ -1039,7 +1036,7 @@ class MainScene extends Phaser.Scene {
     const glow = item.getData('glow') as Phaser.GameObjects.Image | undefined
     glow?.destroy()
     item.destroy()
-    if (item === this.contestedPickup) this.clearContestedPickupState()
+    this.contestedPickupFlow.handlePlayerCollected(item)
 
     if (itemType === 'coffee') this.activateSpeedBoost(this.time.now)
     else if (itemType === 'heart') this.activateHeal()
@@ -1402,7 +1399,7 @@ class MainScene extends Phaser.Scene {
       glow?.destroy()
       item.destroy()
     })
-    this.clearContestedPickupState()
+    this.contestedPickupFlow.clear()
   }
 
   private clearCoinPickups() {
@@ -1429,7 +1426,8 @@ class MainScene extends Phaser.Scene {
   }
 
   private destroyEnemyVisuals(enemy: Phaser.Physics.Arcade.Sprite) {
-    const keys = ['warning', 'explosionWarning', 'contenderMarker', 'upgradeMarker', 'aimCue'] as const
+    this.contestedPickupFlow.handleEnemyRemoved(enemy)
+    const keys = ['warning', 'explosionWarning', 'upgradeMarker', 'aimCue'] as const
     keys.forEach((key) => {
       const object = enemy.getData(key) as Phaser.GameObjects.GameObject | undefined
       if (object?.active) {
@@ -1959,7 +1957,7 @@ class MainScene extends Phaser.Scene {
 
   private enterDustyOutskirtsFromTownRoad() {
     this.levelTwoEncounter.stop()
-    this.pendingContestedPickup = false
+    this.contestedPickupFlow.clear()
     this.townRoadFlow.leaveTownRoad()
     this.currentArea = 'dustyOutskirts'
     this.levelCompleted = true
@@ -1992,9 +1990,7 @@ class MainScene extends Phaser.Scene {
   private resetLevelTwoRuntime() {
     this.levelTwoEncounter.reset()
     this.levelTwoDefeats = 0
-    this.nextLevelTwoPickup = 0
-    this.pendingContestedPickup = false
-    this.clearContestedPickupState()
+    this.contestedPickupFlow.reset()
     this.levelTwoShieldSpawned = false
     this.finalGunslingersSpawned = 0
     this.chargerIntroducedThisRun = false
@@ -2188,7 +2184,7 @@ class MainScene extends Phaser.Scene {
         if (explosiveState) return
       }
 
-      if (this.currentArea === 'townRoad' && this.updateContenderMovement(enemy, this.time.now)) return
+      if (this.currentArea === 'townRoad' && this.contestedPickupFlow.updateEnemyMovement(enemy, this.time.now)) return
 
       if (this.currentArea === 'townRoad') {
         const kind = enemy.getData('kind') as EnemyKind
@@ -2446,8 +2442,8 @@ class MainScene extends Phaser.Scene {
 
     const kind = this.levelTwoEncounter.update(time, this.enemies.countActive(true))
     if (kind) this.spawnLevelTwoEnemy(kind)
-    this.updateContestedPickupPlan(time)
-    this.ensurePrimaryContender()
+    this.contestedPickupFlow.updatePlan(time, this.levelTwoDefeats / LEVEL_TWO_TOTAL_ENEMIES)
+    this.contestedPickupFlow.updatePrimaryContender()
     if (!this.levelTwoShieldSpawned && this.levelTwoDefeats / LEVEL_TWO_TOTAL_ENEMIES >= LEVEL_TWO_CONFIG.shieldProgress) {
       this.levelTwoShieldSpawned = true
       this.spawnShield(true)
@@ -2471,141 +2467,6 @@ class MainScene extends Phaser.Scene {
     this.health = Math.min(this.maxHealth, this.health + LEVEL_TWO_CONFIG.completionRewardHealth)
     this.rebuildHealthDisplay()
     this.showAreaTitle('TOWN ROAD CLEAR', 'The road is safe... for now')
-  }
-
-  private updateContestedPickupPlan(time: number) {
-    if (this.contestedPickup?.active || this.pendingContestedPickup) return
-    const plan = LEVEL_TWO_CONFIG.contestedPickup.plans[this.nextLevelTwoPickup]
-    if (!plan || this.levelTwoDefeats / LEVEL_TWO_TOTAL_ENEMIES < plan.progress) return
-    if (this.getEligibleContenders(plan.type).length === 0) return
-
-    this.pendingContestedPickup = true
-    const { edgePadding, minPlayerDistance, landingWarningMs, reactionDelayMs } = LEVEL_TWO_CONFIG.contestedPickup
-    let x = GAME_WIDTH / 2
-    let y = GAME_HEIGHT / 2
-    for (let attempt = 0; attempt < 12; attempt += 1) {
-      const candidateX = Phaser.Math.Between(edgePadding, GAME_WIDTH - edgePadding)
-      const candidateY = Phaser.Math.Between(edgePadding, GAME_HEIGHT - edgePadding)
-      if (Phaser.Math.Distance.Between(candidateX, candidateY, this.player.x, this.player.y) >= minPlayerDistance) {
-        x = candidateX
-        y = candidateY
-        break
-      }
-    }
-    const warning = this.add.circle(x, y, 28, 0xffd166, 0.14).setStrokeStyle(2, 0xffd166, 0.9).setDepth(3)
-    this.tweens.add({ targets: warning, scale: 1.35, duration: 180, yoyo: true, repeat: 2 })
-    this.time.delayedCall(landingWarningMs, () => {
-      warning.destroy()
-      if (this.currentArea !== 'townRoad' || this.levelTwoCompleted) {
-        this.pendingContestedPickup = false
-        return
-      }
-      const labels: Record<ContestedPickupType, string> = {
-        coffee: 'COFFEE', ammo: 'AMMO', buckshot: 'BUCKSHOT', dynamite: 'DYNAMITE',
-      }
-      this.contestedPickup = this.spawnPickupSprite(plan.type, plan.type, labels[plan.type], x, y, true)
-      this.contenderEnabledAt = time + landingWarningMs + reactionDelayMs
-      this.pendingContestedPickup = false
-      this.nextLevelTwoPickup += 1
-      this.assignPrimaryContender(plan.type)
-    })
-  }
-
-  private getEligibleContenders(type: ContestedPickupType) {
-    if ((type === 'ammo' || type === 'buckshot')
-      && this.enemies.getChildren().some((child) => child.active && child.getData('upgrade'))) return []
-    return this.enemies.getChildren()
-      .map((child) => child as Phaser.Physics.Arcade.Sprite)
-      .filter((enemy) => {
-        if (!enemy.active || enemy.getData('busy') || enemy.getData('state') === 'charge' || enemy.getData('state') === 'telegraph') return false
-        const kind = enemy.getData('kind') as EnemyKind
-        return type === 'ammo' || type === 'buckshot' ? kind === 'gunslinger' : kind === 'chaser' || kind === 'charger'
-      })
-  }
-
-  private assignPrimaryContender(type: ContestedPickupType) {
-    const candidates = this.getEligibleContenders(type)
-    if (candidates.length === 0) return
-    this.primaryContender = Phaser.Utils.Array.GetRandom(candidates)
-    this.contenderInterceptUntil = this.time.now + LEVEL_TWO_CONFIG.contestedPickup.gunslingerInterceptMs
-    const marker = this.add.text(this.primaryContender.x, this.primaryContender.y - 46, '!', {
-      fontFamily: 'monospace', fontSize: '24px', color: '#ffdf64', stroke: '#2b1d16', strokeThickness: 4,
-    }).setOrigin(0.5).setDepth(10)
-    this.primaryContender.setData('contenderMarker', marker)
-  }
-
-  private ensurePrimaryContender() {
-    if (!this.contestedPickup?.active) return
-    if (this.primaryContender?.active) {
-      const marker = this.primaryContender.getData('contenderMarker') as Phaser.GameObjects.Text | undefined
-      marker?.setPosition(this.primaryContender.x, this.primaryContender.y - 46)
-      return
-    }
-    const type = this.contestedPickup.getData('type') as ContestedPickupType
-    this.assignPrimaryContender(type)
-  }
-
-  private updateContenderMovement(enemy: Phaser.Physics.Arcade.Sprite, time: number) {
-    const pickup = this.contestedPickup
-    if (!pickup?.active || time < this.contenderEnabledAt) return false
-    const type = pickup.getData('type') as ContestedPickupType
-    if (!this.getEligibleContenders(type).includes(enemy)) return false
-    const distance = Phaser.Math.Distance.Between(enemy.x, enemy.y, pickup.x, pickup.y)
-    const isPrimary = enemy === this.primaryContender
-    if (!isPrimary && distance > 52) return false
-
-    if (this.shouldGunslingerInterceptPickup(enemy, pickup, distance, isPrimary, time)) {
-      const blockTarget = {
-        x: (this.player.x + pickup.x) / 2,
-        y: (this.player.y + pickup.y) / 2,
-      }
-      this.physics.moveTo(enemy, blockTarget.x, blockTarget.y, LEVEL_TWO_CONFIG.enemy.gunslinger.speed)
-      const nextAttack = (enemy.getData('nextAttack') as number | undefined) ?? time
-      if (!enemy.getData('busy') && time >= nextAttack) this.startGunslingerAttack(enemy, time)
-      return true
-    }
-
-    if (distance <= LEVEL_TWO_CONFIG.contestedPickup.pickupDistance) {
-      const holdUntil = enemy.getData('pickupHoldUntil') as number | undefined
-      if (!holdUntil) {
-        enemy.setData('pickupHoldUntil', time + LEVEL_TWO_CONFIG.contestedPickup.enemyPickupHoldMs)
-        enemy.setVelocity(0, 0)
-      } else if (time >= holdUntil && pickup.active) {
-        this.applyEnemyPickup(enemy, type)
-        const glow = pickup.getData('glow') as Phaser.GameObjects.Image | undefined
-        glow?.destroy()
-        pickup.destroy()
-        this.clearContestedPickupState()
-      }
-      return true
-    }
-    enemy.setData('pickupHoldUntil', undefined)
-    this.physics.moveToObject(enemy, pickup, (enemy.getData('speed') as number) || 90)
-    return true
-  }
-
-  private shouldGunslingerInterceptPickup(
-    enemy: Phaser.Physics.Arcade.Sprite,
-    pickup: Phaser.Physics.Arcade.Sprite,
-    enemyDistance: number,
-    isPrimary: boolean,
-    time: number,
-  ) {
-    if (!isPrimary || enemy.getData('kind') !== 'gunslinger' || time >= this.contenderInterceptUntil) return false
-    const playerDistance = Phaser.Math.Distance.Between(this.player.x, this.player.y, pickup.x, pickup.y)
-    return playerDistance < LEVEL_TWO_CONFIG.contestedPickup.minPlayerDistance
-      && enemyDistance > LEVEL_TWO_CONFIG.contestedPickup.pickupDistance
-  }
-
-  private clearContestedPickupState() {
-    if (this.primaryContender?.active) {
-      const marker = this.primaryContender.getData('contenderMarker') as Phaser.GameObjects.Text | undefined
-      marker?.destroy()
-      this.primaryContender.setData('contenderMarker', undefined)
-    }
-    this.primaryContender = undefined
-    this.contestedPickup = undefined
-    this.contenderInterceptUntil = 0
   }
 
   private applyEnemyPickup(enemy: Phaser.Physics.Arcade.Sprite, type: ContestedPickupType) {
