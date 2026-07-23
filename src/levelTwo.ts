@@ -23,6 +23,14 @@ export const LEVEL_TWO_CONFIG = {
   spawnInterval: 600,
   nextBatchDelay: 2500,
   nextBatchDefeatRatio: 0.65,
+  combatEntry: {
+    triggerY: 500,
+    lineWidth: 360,
+  },
+  townRoadReturn: {
+    halfWidth: 82,
+    triggerY: 662,
+  },
   enemy: {
     chaser: { health: 1, speed: [82, 112] as const },
     charger: {

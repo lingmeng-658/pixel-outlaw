@@ -94,6 +94,8 @@ class MainScene extends Phaser.Scene {
   private areaBackgroundObjects: Phaser.GameObjects.GameObject[] = []
   private exitMarkerObjects: Phaser.GameObjects.GameObject[] = []
   private areaTitleObjects: Phaser.GameObjects.GameObject[] = []
+  private townRoadCombatTriggerObjects: Phaser.GameObjects.GameObject[] = []
+  private townRoadReturnObjects: Phaser.GameObjects.GameObject[] = []
   private levelCompleteText?: Phaser.GameObjects.Text
   private savedGame: LevelOneSaveData | null = null
   private levelTwoEncounter = new ContinuousEncounter(
@@ -103,6 +105,8 @@ class MainScene extends Phaser.Scene {
     LEVEL_TWO_CONFIG.nextBatchDefeatRatio,
   )
   private levelTwoCompleted = false
+  private levelTwoCombatStarted = false
+  private townRoadReturnOpen = false
   private levelTwoDefeats = 0
   private nextLevelTwoPickup = 0
   private pendingContestedPickup = false
@@ -449,6 +453,22 @@ class MainScene extends Phaser.Scene {
     this.exitMarkerObjects = []
   }
 
+  private clearTownRoadCombatTrigger() {
+    this.townRoadCombatTriggerObjects.forEach((object) => {
+      this.tweens.killTweensOf(object)
+      object.destroy()
+    })
+    this.townRoadCombatTriggerObjects = []
+  }
+
+  private clearTownRoadReturnObjects() {
+    this.townRoadReturnObjects.forEach((object) => {
+      this.tweens.killTweensOf(object)
+      object.destroy()
+    })
+    this.townRoadReturnObjects = []
+  }
+
   private clearAreaTitle() {
     this.areaTitleObjects.forEach((object) => {
       this.tweens.killTweensOf(object)
@@ -568,30 +588,12 @@ class MainScene extends Phaser.Scene {
     )
     southTrail.setDepth(-3)
 
-    const returnSign = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 76, 'BACK TO OUTSKIRTS', {
-      fontFamily: 'monospace',
-      fontSize: '15px',
-      color: '#ffe6a7',
-      stroke: '#2b1d16',
-      strokeThickness: 4,
-    }).setOrigin(0.5).setDepth(8)
-
-    const returnArrow = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 42, '↓', {
-      fontFamily: 'monospace',
-      fontSize: '28px',
-      color: '#ffe6a7',
-      stroke: '#2b1d16',
-      strokeThickness: 4,
-    }).setOrigin(0.5).setDepth(8)
-
     this.areaBackgroundObjects = [
       outerGround,
       innerGround,
       road,
       roadHighlight,
       southTrail,
-      returnSign,
-      returnArrow,
     ]
   }
 
@@ -654,7 +656,11 @@ class MainScene extends Phaser.Scene {
     this.areaBackgroundObjects = []
     this.exitMarkerObjects = []
     this.areaTitleObjects = []
+    this.townRoadCombatTriggerObjects = []
+    this.townRoadReturnObjects = []
     this.levelCompleteText = undefined
+    this.levelTwoCombatStarted = false
+    this.townRoadReturnOpen = false
   }
 
   private handleStartInput() {
@@ -684,6 +690,7 @@ class MainScene extends Phaser.Scene {
 
   private handleTownRoadInput() {
     this.checkTownRoadReturnExit()
+    this.checkLevelTwoCombatTrigger()
   }
 
   private handlePauseInput() {
@@ -1882,19 +1889,23 @@ class MainScene extends Phaser.Scene {
   }
 
   private checkTownRoadReturnExit() {
-    if (this.currentArea !== 'townRoad' || this.isAreaTransitioning) return
+    if (!this.canReturnFromTownRoad() || this.isAreaTransitioning) return
     if (this.time.now < this.areaTransitionReadyAt) return
 
-    const isInsideSouthExitX = Math.abs(this.player.x - GAME_WIDTH / 2) <= 82
-    const reachedSouthRoad = this.player.y >= GAME_HEIGHT - 58
+    const isInsideSouthExitX = Math.abs(this.player.x - GAME_WIDTH / 2) <= LEVEL_TWO_CONFIG.townRoadReturn.halfWidth
+    const reachedSouthRoad = this.player.y >= LEVEL_TWO_CONFIG.townRoadReturn.triggerY
 
     if (isInsideSouthExitX && reachedSouthRoad) {
       this.transitionToDustyOutskirts()
     }
   }
 
+  private canReturnFromTownRoad() {
+    return this.currentArea === 'townRoad' && this.townRoadReturnOpen
+  }
+
   private transitionToDustyOutskirts() {
-    if (this.currentArea !== 'townRoad' || this.isAreaTransitioning) return
+    if (!this.canReturnFromTownRoad() || this.isAreaTransitioning) return
 
     this.isAreaTransitioning = true
     this.player.setVelocity(0, 0)
@@ -1944,13 +1955,17 @@ class MainScene extends Phaser.Scene {
     this.showAreaTitle('TOWN ROAD', 'Stay sharp. The road is contested.')
     if (!this.levelTwoCompleted) {
       this.resetLevelTwoRuntime()
-      this.levelTwoEncounter.start(this.time.now)
+      this.showTownRoadCombatTrigger()
     }
+    this.setTownRoadReturnOpen(true)
   }
 
   private enterDustyOutskirtsFromTownRoad() {
     this.levelTwoEncounter.stop()
+    this.levelTwoCombatStarted = false
     this.pendingContestedPickup = false
+    this.clearTownRoadCombatTrigger()
+    this.setTownRoadReturnOpen(false)
     this.currentArea = 'dustyOutskirts'
     this.levelCompleted = true
     this.isLevelClear = true
@@ -1980,6 +1995,9 @@ class MainScene extends Phaser.Scene {
   }
 
   private resetLevelTwoRuntime() {
+    this.levelTwoEncounter.reset()
+    this.levelTwoCombatStarted = false
+    this.clearTownRoadCombatTrigger()
     this.levelTwoDefeats = 0
     this.nextLevelTwoPickup = 0
     this.pendingContestedPickup = false
@@ -1996,6 +2014,62 @@ class MainScene extends Phaser.Scene {
     this.resetHeartDropCooldown()
     this.mercyArmed = false
     this.mercyDropAttempts = 0
+  }
+
+  private showTownRoadCombatTrigger() {
+    this.clearTownRoadCombatTrigger()
+    const { triggerY, lineWidth } = LEVEL_TWO_CONFIG.combatEntry
+    const line = this.add.rectangle(GAME_WIDTH / 2, triggerY, lineWidth, 4, 0xffc857, 0.82)
+      .setStrokeStyle(1, 0x2b1d16).setDepth(6)
+    const prompt = this.add.text(GAME_WIDTH / 2, triggerY + 28, 'MOVE NORTH TO ENGAGE', {
+      fontFamily: 'monospace',
+      fontSize: '16px',
+      color: '#ffe6a7',
+      stroke: '#2b1d16',
+      strokeThickness: 4,
+    }).setOrigin(0.5).setDepth(8)
+    this.townRoadCombatTriggerObjects = [line, prompt]
+    this.tweens.add({
+      targets: prompt,
+      alpha: 0.45,
+      duration: 700,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    })
+  }
+
+  private checkLevelTwoCombatTrigger() {
+    if (this.currentArea !== 'townRoad' || this.levelTwoCompleted || this.levelTwoCombatStarted) return
+    if (this.isAreaTransitioning || this.player.y > LEVEL_TWO_CONFIG.combatEntry.triggerY) return
+
+    this.levelTwoCombatStarted = true
+    this.clearTownRoadCombatTrigger()
+    this.setTownRoadReturnOpen(false)
+    this.levelTwoEncounter.start(this.time.now)
+    this.showFloatingText(GAME_WIDTH / 2, LEVEL_TWO_CONFIG.combatEntry.triggerY - 26, 'AMBUSH STARTED')
+  }
+
+  private setTownRoadReturnOpen(open: boolean) {
+    this.townRoadReturnOpen = open
+    this.clearTownRoadReturnObjects()
+    if (!open || this.currentArea !== 'townRoad') return
+
+    const returnSign = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 76, 'BACK TO OUTSKIRTS', {
+      fontFamily: 'monospace',
+      fontSize: '15px',
+      color: '#ffe6a7',
+      stroke: '#2b1d16',
+      strokeThickness: 4,
+    }).setOrigin(0.5).setDepth(8)
+    const returnArrow = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 42, '↓', {
+      fontFamily: 'monospace',
+      fontSize: '28px',
+      color: '#ffe6a7',
+      stroke: '#2b1d16',
+      strokeThickness: 4,
+    }).setOrigin(0.5).setDepth(8)
+    this.townRoadReturnObjects = [returnSign, returnArrow]
   }
 
   private showAreaTitle(title: string, subtitle: string) {
@@ -2423,7 +2497,7 @@ class MainScene extends Phaser.Scene {
   }
 
   private updateLevelTwo(time: number) {
-    if (this.levelTwoCompleted) return
+    if (this.levelTwoCompleted || !this.levelTwoCombatStarted) return
 
     const kind = this.levelTwoEncounter.update(time, this.enemies.countActive(true))
     if (kind) this.spawnLevelTwoEnemy(kind)
@@ -2437,9 +2511,12 @@ class MainScene extends Phaser.Scene {
 
     if (this.levelTwoEncounter.isComplete(this.enemies.countActive(true))) {
       this.levelTwoCompleted = true
+      this.levelTwoCombatStarted = false
       this.levelTwoEncounter.stop()
       this.enemyBullets.clear(true, true)
       this.clearItems()
+      this.clearTownRoadCombatTrigger()
+      this.setTownRoadReturnOpen(true)
       this.maxHealth += LEVEL_TWO_CONFIG.completionRewardHealth
       this.health = Math.min(this.maxHealth, this.health + LEVEL_TWO_CONFIG.completionRewardHealth)
       this.rebuildHealthDisplay()
