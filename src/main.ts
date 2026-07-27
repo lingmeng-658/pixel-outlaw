@@ -1,5 +1,6 @@
 import Phaser from 'phaser'
 import './style.css'
+import playerIdleDownUrl from './assets/sprites/player/player-idle-down.png'
 import {
   BULLET_SPEED,
   GAME_HEIGHT,
@@ -142,6 +143,10 @@ class MainScene extends Phaser.Scene {
     super('MainScene')
   }
 
+  preload() {
+    this.load.image('playerIdleDown', playerIdleDownUrl)
+  }
+
   create(data?: SceneStartData) {
     const startData: SceneStartData = data ?? { mode: 'title' }
     this.resetRunState()
@@ -153,7 +158,8 @@ class MainScene extends Phaser.Scene {
 
     this.drawDustyOutskirtsBackground()
 
-    this.player = this.physics.add.sprite(GAME_WIDTH / 2, GAME_HEIGHT / 2, 'player')
+    this.player = this.physics.add.sprite(GAME_WIDTH / 2, GAME_HEIGHT / 2, 'playerIdleDown')
+    this.player.body?.setSize(28, 28, true)
     this.player.setCollideWorldBounds(true)
     this.player.setDepth(5)
     this.player.setVisible(false)

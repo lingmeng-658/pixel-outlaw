@@ -13,17 +13,43 @@
 
 ## Last Updated
 
-- Date: 2026-07-23
+- Date: 2026-07-27
 - Updated by: Codex
 - Branch: main
-- Commit: pending `fix: 修复可复用关卡生命周期`
+- Commit: pending `feat: 接入玩家角色素材`
 - Related commits:
+  - `fbcd872 feat: 添加玩家角色素材`
   - `df9ee22 docs: 调整为可复用关卡生命周期修复`
   - `1b3186f refactor: 拆分道具争夺控制`
 
 ---
 
 ## Current Project Snapshot
+
+### 2026-07-27 接入玩家单帧素材
+
+本轮目标：将 `src/assets/sprites/player/player-idle-down.png` 接入游戏，替换玩家画面中的程序生成纹理，只验证单帧显示尺寸与碰撞语义。
+
+实际修改：
+
+- `src/main.ts`：通过 Vite URL import 获取 PNG 地址，在 Phaser `preload()` 中以 `playerIdleDown` key 加载。
+- `src/main.ts`：玩家创建改用 `playerIdleDown`，保持素材原生 32×32 显示；Arcade body 显式设为 28×28 并自动居中，对应 offset 2×2。
+- 原 `player` 程序纹理保留；未修改出生位置、depth、世界边界、移动、射击、敌人、关卡、存档或玩法数值。
+- `pixelArt: true` 与 canvas 的 `image-rendering: pixelated` 继续提供最近邻显示。
+
+验证结果：
+
+- 修改前、修改后 `npm run build` 均通过，仅有既有 Vite 大 chunk 警告。
+- `git diff --check` 通过。
+- Playwright 实际验证标题页、点击 START、SPACE、WASD、四方向与四个对角方向射击、ESC 暂停、Restart Level、Save Progress & Quit、Continue；Restart / Continue / 新开局后均继续显示新玩家素材。
+- 截图确认玩家约 32×32、与普通敌人尺寸协调、透明背景无矩形底色、灰边或明显光晕。
+- 浏览器 Console 0 error；截图读取产生 Chromium WebGL `ReadPixels` 性能 warning，不是游戏代码 warning。
+
+当前风险与用户确认点：Arcade debug 未开启，碰撞箱以明确的 28×28 与居中 offset 代码核对，并完成基础碰撞观感回归；建议用户最终人工确认角色与敌人接触时的碰撞手感，以及 32×32 角色在实际屏幕缩放下的视觉大小。
+
+建议下一步：用户审查本提交并运行 `npm run dev` 做最终视觉判断。本轮不继续制作方向帧或动画。
+
+提交状态：待提交并 push `main`。
 
 Pixel Outlaw 已经不是刚搭起来的 demo，而是一个完成度较高的第一关垂直切片。
 
