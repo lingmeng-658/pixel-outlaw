@@ -13,18 +13,44 @@
 
 ## Last Updated
 
-- Date: 2026-07-27
+- Date: 2026-07-28
 - Updated by: Codex
 - Branch: main
-- Commit: pending `feat: 接入玩家角色素材`
+- Commit: pending `feat: 接入玩家跑动动画`
 - Related commits:
+  - `a4b03fe feat: 添加玩家跑动帧素材`
+  - `c0f0971 feat: 接入玩家角色素材`
   - `fbcd872 feat: 添加玩家角色素材`
-  - `df9ee22 docs: 调整为可复用关卡生命周期修复`
-  - `1b3186f refactor: 拆分道具争夺控制`
 
 ---
 
 ## Current Project Snapshot
+
+### 2026-07-28 玩家双帧跑动动画实验
+
+本轮目标：将 `player-run-a.png` 和 `player-run-b.png` 接入现有玩家 Sprite，用双帧循环验证能否缓解静态贴图滑动感。
+
+实际修改：
+
+- `src/main.ts`：通过 Vite URL import 和 Phaser `preload()` 分别加载 `playerIdleDown`、`playerRunA`、`playerRunB`。
+- `src/main.ts`：创建具名动画 `playerRun`，使用两个独立纹理、`frameRate: 6`、`repeat: -1`；创建前检查动画是否已存在，避免 Scene restart 重复创建。
+- `src/main.ts`：`handlePlayerMove()` 计算并设置本帧最终速度后调用 `updatePlayerAnimation()`；实际速度非零时只在尚未播放该动画时启动，速度归零时停止动画并恢复 `playerIdleDown`。
+- `src/main.ts`：暂停、区域切换和 Game Over 主动调用 `showPlayerIdle()`；该方法检查当前动画和纹理 key，避免每帧重复停止动画或 `setTexture()`。
+- 玩家仍按素材原生 32×32 显示；现有 28×28 居中 Arcade body、origin、scale、depth、出生位置、世界边界和移动速度代码均未修改。
+
+自动验收：
+
+- 修改前与修改后 `npm run build` 均通过，仅有既有 Vite 大 chunk 警告。
+- `git diff --check` 通过；完整 diff 和 status 已审查。
+- 按用户要求未使用浏览器插件，未由 Codex 执行浏览器自动验收或 Console 检查。
+
+当前风险与用户确认点：
+
+- 用户仍需运行 `npm run dev`，确认标题页、START/SPACE、WASD/对角移动、松键恢复 idle、动画不会卡第一帧、射击、暂停、Restart、Save & Quit / Continue 和 Console。
+- 两张实验帧姿态差异明显，循环可能出现身体重心、脚步位置或轮廓跳动；是否比静态滑动更自然需要用户主观试玩。
+- 本轮是双帧动画实验，不代表正式玩家动画定稿。
+
+提交状态：待提交并 push `main`；提交信息为 `feat: 接入玩家跑动动画`。
 
 ### 2026-07-27 接入玩家单帧素材
 

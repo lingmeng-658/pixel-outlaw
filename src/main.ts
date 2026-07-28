@@ -1,6 +1,8 @@
 import Phaser from 'phaser'
 import './style.css'
 import playerIdleDownUrl from './assets/sprites/player/player-idle-down.png'
+import playerRunAUrl from './assets/sprites/player/player-run-a.png'
+import playerRunBUrl from './assets/sprites/player/player-run-b.png'
 import {
   BULLET_SPEED,
   GAME_HEIGHT,
@@ -145,6 +147,8 @@ class MainScene extends Phaser.Scene {
 
   preload() {
     this.load.image('playerIdleDown', playerIdleDownUrl)
+    this.load.image('playerRunA', playerRunAUrl)
+    this.load.image('playerRunB', playerRunBUrl)
   }
 
   create(data?: SceneStartData) {
@@ -163,6 +167,18 @@ class MainScene extends Phaser.Scene {
     this.player.setCollideWorldBounds(true)
     this.player.setDepth(5)
     this.player.setVisible(false)
+
+    if (!this.anims.exists('playerRun')) {
+      this.anims.create({
+        key: 'playerRun',
+        frames: [
+          { key: 'playerRunA' },
+          { key: 'playerRunB' },
+        ],
+        frameRate: 6,
+        repeat: -1,
+      })
+    }
 
     this.bullets = this.physics.add.group()
     this.enemyBullets = this.physics.add.group()
@@ -415,6 +431,7 @@ class MainScene extends Phaser.Scene {
 
     if (this.isAreaTransitioning) {
       this.player.setVelocity(0, 0)
+      this.showPlayerIdle()
       return
     }
 
@@ -430,6 +447,7 @@ class MainScene extends Phaser.Scene {
     this.updateSpeedBoost(time)
     this.updateShield(time)
     this.handlePlayerMove()
+    this.updatePlayerAnimation()
     this.handleShooting(time)
     this.moveBullets(delta)
     this.moveEnemyBullets(delta)
@@ -730,6 +748,7 @@ class MainScene extends Phaser.Scene {
     this.pauseText.setText('PAUSED\n\n[ESC] Continue\n[R] Restart Level\n[S] Save Progress & Quit')
 
     this.player.setVelocity(0, 0)
+    this.showPlayerIdle()
     this.enemies.getChildren().forEach((child) => {
       const enemy = child as Phaser.Physics.Arcade.Sprite
       enemy.setVelocity(0, 0)
@@ -1013,6 +1032,7 @@ class MainScene extends Phaser.Scene {
 
     this.isGameOver = true
     this.player.setVelocity(0, 0)
+    this.showPlayerIdle()
     this.stopSpeedBoostPulse()
     this.clearShield()
     this.levelTwoEncounter.stop()
@@ -1595,6 +1615,30 @@ class MainScene extends Phaser.Scene {
 
     if (vx !== 0 && vy !== 0) {
       this.player.body?.velocity.normalize().scale(speed)
+    }
+  }
+
+  private updatePlayerAnimation() {
+    const velocity = this.player.body?.velocity
+    const isMoving = Boolean(velocity && (velocity.x !== 0 || velocity.y !== 0))
+    const isPlayingRun = this.player.anims.isPlaying
+      && this.player.anims.currentAnim?.key === 'playerRun'
+
+    if (isMoving) {
+      if (!isPlayingRun) this.player.play('playerRun')
+      return
+    }
+
+    this.showPlayerIdle()
+  }
+
+  private showPlayerIdle() {
+    const isPlayingRun = this.player.anims.isPlaying
+      && this.player.anims.currentAnim?.key === 'playerRun'
+
+    if (isPlayingRun) this.player.stop()
+    if (this.player.texture.key !== 'playerIdleDown') {
+      this.player.setTexture('playerIdleDown')
     }
   }
 
