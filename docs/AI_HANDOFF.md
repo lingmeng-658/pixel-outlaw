@@ -13,11 +13,12 @@
 
 ## Last Updated
 
-- Date: 2026-07-28
+- Date: 2026-07-29
 - Updated by: Codex
 - Branch: main
-- Commit: pending `feat: 接入玩家跑动动画`
+- Commit: `134ee0e feat: 接入玩家跑动动画`
 - Related commits:
+  - `134ee0e feat: 接入玩家跑动动画`
   - `a4b03fe feat: 添加玩家跑动帧素材`
   - `c0f0971 feat: 接入玩家角色素材`
   - `fbcd872 feat: 添加玩家角色素材`
@@ -25,6 +26,39 @@
 ---
 
 ## Current Project Snapshot
+
+### 2026-07-29 玩家 sprite sheet 接入前审查
+
+本轮目标：只读检查新增的 `public/assets/raw/player/player_sprite_sheet.png`，分析现有资源组织、Phaser 加载链路、素材裁剪方式和最小接入方案；按用户要求未修改游戏代码或素材。
+
+审查结论：
+
+- 当前正式玩家资源位于 `src/assets/sprites/player/`，以 Vite URL import 配合 Phaser `preload()` 的 `load.image()` 加载；当前 `playerIdleDown`、`playerRunA`、`playerRunB` 是三个独立的 32×32 RGBA 纹理。
+- `src/textures.ts` 负责程序生成的临时纹理；旧 `player` 程序纹理仍保留，但当前玩家 Sprite 已不使用它。
+- 新图实际为 1254×1254 RGB、无透明通道的展示板，包含标题、动作/方向标签、棋盘背景、方向示意和调色板，不是可直接传给 `load.spritesheet()` 的规则图集。
+- 展示板表达 4 行 × 5 列共 20 个主要姿态：Idle A、Idle B、Run A、Run B；每行依次为 Down、Down-right、Right、Up-right、Up。Left、Down-left、Up-left 可复用右侧对应帧并水平翻转。
+- 推荐先从原始美术文件导出正式 RGBA 图集：单帧 48×48、5 列 × 4 行、总尺寸 240×192、无外边距、无帧间距、透明背景。若只能使用展示板，需要在图像工具中逐帧裁切、去除已经烘焙的棋盘背景并检查深色轮廓，不能仅按 48×48 自动切片。
+- 正式运行时图集建议放到 `src/assets/sprites/player/player-sprite-sheet.png`；`public/assets/raw/` 继续作为原稿目录，不由游戏直接加载。
+
+最小接入方案：
+
+- 预计只新增一张清理后的正式图集并修改 `src/main.ts`。
+- 通过 Vite import 获取图集 URL，在 `preload()` 使用 `load.spritesheet()`，设置 `frameWidth: 48`、`frameHeight: 48`。
+- 创建五组方向的 idle/run 双帧动画；移动时根据最终速度选择方向，静止时保留最后朝向；左侧三个方向通过 `flipX` 复用右侧帧。
+- 第一轮保持玩家速度、出生位置、射击、关卡、存档和现有 28×28 居中 Arcade body 不变，不把功能接入与结构重构混在一起。
+
+当前风险与待确认：
+
+- 当前玩家按 32×32 原生显示，新素材标注为 48×48；直接显示会让角色明显变大，缩放到 32×32 则是非整数缩放，可能损伤像素轮廓。接入前需要用户确认采用 48×48 视觉尺寸，还是先制作人工修整的 32×32 版本。
+- 当前玩家动画只判断是否移动，没有持久化朝向；完整方向动画需要新增一个小型朝向状态，但不需要改变射击方向逻辑。
+- 最可靠的下一步是先取得或导出透明的规则 20 帧图集，再实施 Phaser 接入和浏览器试玩。
+
+执行与验证：
+
+- 审查了 `PROJECT_CONTEXT.md`、`docs/AI_HANDOFF.md`、`docs/NEXT_TASK.md`、`src/main.ts`、`src/textures.ts`、`src/constants.ts`、`src/style.css`、`vite.config.ts` 及相关玩家图片元数据。
+- 本轮仅更新本交接文档，没有修改代码或素材。
+- 未运行 `npm run build`，因为没有代码改动。
+- 未提交、未 push。
 
 ### 2026-07-28 玩家双帧跑动动画实验
 
