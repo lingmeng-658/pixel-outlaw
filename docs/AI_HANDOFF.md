@@ -16,8 +16,10 @@
 - Date: 2026-07-29
 - Updated by: Codex
 - Branch: main
-- Commit: pending `feat: 整理玩家 sprite sheet 资源`
+- Commit: `feat: 接入玩家 sprite sheet 动画`
 - Related commits:
+  - `0773093 docs: 更新玩家 sprite sheet 接入任务`
+  - `08d758e feat: 整理玩家 sprite sheet 资源`
   - `1dced0a docs: 记录玩家图集接入方案`
   - `134ee0e feat: 接入玩家跑动动画`
   - `a4b03fe feat: 添加玩家跑动帧素材`
@@ -27,6 +29,37 @@
 ---
 
 ## Current Project Snapshot
+
+### 2026-07-29 接入玩家 sprite sheet 动画
+
+本轮目标：将正式 48×48 玩家 sprite sheet 接入 Phaser，实现八方向移动朝向、五组正式方向动画和停止后保持最后朝向；不改变射击、速度、碰撞、敌人、关卡或存档。
+
+实际修改：
+
+- `src/main.ts`：改用 `load.spritesheet()` 加载 `player-sprite-sheet.png`，帧尺寸为 48×48；玩家视觉改为素材原生 48×48，Arcade body 继续使用原有 28×28 并自动居中。
+- `src/main.ts`：按图集四行五列映射创建 `idle-down`、`idle-down-right`、`idle-right`、`idle-up-right`、`idle-up` 与对应五个 `run-*` 动画；idle 使用第 0/1 行，run 使用第 2/3 行，Scene restart 时通过 key 检查避免重复创建。
+- `src/main.ts`：新增最小 `playerFacing` 状态。移动时依据归一化后的最终速度更新八方向朝向，停止时保持最后朝向播放 idle；左、左下、左上分别复用 right、down-right、up-right 动画并设置 `flipX`。
+- `src/main.ts`：暂停、区域切换和 Game Over 继续走统一 idle 入口；射击方向逻辑未修改。
+- `src/playerDirection.ts`：新增不依赖 Phaser 的方向选择、动画方向复用和左向翻转纯函数。
+- `src/playerDirection.test.mjs`：使用 Node 内置测试覆盖八方向、零速度 fallback、左向帧复用和翻转，共 4 项测试。
+- `docs/superpowers/plans/2026-07-29-player-sprite-sheet-animation.md`：记录本轮小步实现与验证计划。
+
+验证结果：
+
+- TDD RED：纯方向模块尚不存在时，独立 TypeScript 编译按预期失败。
+- TDD GREEN：方向模块编译后，Node 内置测试 4/4 通过。
+- `npm run build` 通过；仅有既有 Vite 大 chunk 警告。
+- `git diff --check` 通过；最终 diff、stat 与 status 已复核。
+
+当前风险与用户确认点：
+
+- 用户需运行 `npm run dev`，确认 48×48 视觉尺寸、八方向移动朝向、停止后保持朝向、三种左向翻转、动画循环、暂停、Restart、Save & Quit / Continue 和 Console。
+- 28×28 body 已由 Phaser 的 `setSize(28, 28, true)` 居中，但 48×48 视觉与敌人接触时的主观碰撞手感仍需实际试玩。
+- idle 双帧暂用 3 fps，run 双帧沿用 6 fps；节奏是否自然需要视觉确认。
+
+范围确认：未修改移动速度、射击系统、碰撞数值、敌人、关卡、存档、输入或玩法逻辑；旧三个 32×32 实验帧仍保留，未在本轮删除。
+
+提交状态：已提交为 `feat: 接入玩家 sprite sheet 动画`；待 push。
 
 ### 2026-07-29 整理玩家正式 sprite sheet 资源
 
@@ -61,7 +94,7 @@
 - 展示板本身是无 alpha 的 RGB 合成图，本轮通过棋盘背景识别和整数像素块采样恢复正式透明资源；后续接入前仍建议由用户在像素编辑器中做一次最终视觉复核。
 - 下一轮可单独接入 Phaser `load.spritesheet()` 和方向动画；必须继续保持现有碰撞数值和玩法逻辑稳定。
 
-提交状态：待使用 `feat: 整理玩家 sprite sheet 资源` 提交；未 push。
+提交状态：已提交为 `08d758e feat: 整理玩家 sprite sheet 资源`。
 
 ### 2026-07-29 玩家 sprite sheet 接入前审查
 

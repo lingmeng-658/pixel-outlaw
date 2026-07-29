@@ -1,8 +1,6 @@
 import Phaser from 'phaser'
 import './style.css'
-import playerIdleDownUrl from './assets/sprites/player/player-idle-down.png'
-import playerRunAUrl from './assets/sprites/player/player-run-a.png'
-import playerRunBUrl from './assets/sprites/player/player-run-b.png'
+import playerSpriteSheetUrl from './assets/sprites/player/player-sprite-sheet.png'
 import {
   BULLET_SPEED,
   GAME_HEIGHT,
@@ -24,6 +22,12 @@ import { LEVEL_ONE_CONFIG } from './levelOne'
 import { ContinuousEncounter } from './encounter'
 import { LEVEL_TWO_CONFIG, LEVEL_TWO_TOTAL_ENEMIES } from './levelTwo'
 import { createLevelOneSaveData, loadLevelOneSaveData, SAVE_KEY } from './save'
+import {
+  getPlayerAnimationDirection,
+  getPlayerFacing,
+  shouldFlipPlayer,
+  type PlayerFacing,
+} from './playerDirection'
 import { createTextures } from './textures'
 import { TownRoadFlow } from './townRoadFlow'
 import type { LevelOneSaveData } from './save'
@@ -31,6 +35,7 @@ import type { AreaId, ContestedPickupType, EnemyKind, GunslingerUpgrade, PickupT
 
 class MainScene extends Phaser.Scene {
   private player!: Phaser.Physics.Arcade.Sprite
+  private playerFacing: PlayerFacing = 'down'
   private bullets!: Phaser.Physics.Arcade.Group
   private enemyBullets!: Phaser.Physics.Arcade.Group
   private enemies!: Phaser.Physics.Arcade.Group
@@ -146,9 +151,10 @@ class MainScene extends Phaser.Scene {
   }
 
   preload() {
-    this.load.image('playerIdleDown', playerIdleDownUrl)
-    this.load.image('playerRunA', playerRunAUrl)
-    this.load.image('playerRunB', playerRunBUrl)
+    this.load.spritesheet('playerSpriteSheet', playerSpriteSheetUrl, {
+      frameWidth: 48,
+      frameHeight: 48,
+    })
   }
 
   create(data?: SceneStartData) {
@@ -162,23 +168,14 @@ class MainScene extends Phaser.Scene {
 
     this.drawDustyOutskirtsBackground()
 
-    this.player = this.physics.add.sprite(GAME_WIDTH / 2, GAME_HEIGHT / 2, 'playerIdleDown')
+    this.player = this.physics.add.sprite(GAME_WIDTH / 2, GAME_HEIGHT / 2, 'playerSpriteSheet', 0)
     this.player.body?.setSize(28, 28, true)
     this.player.setCollideWorldBounds(true)
     this.player.setDepth(5)
     this.player.setVisible(false)
 
-    if (!this.anims.exists('playerRun')) {
-      this.anims.create({
-        key: 'playerRun',
-        frames: [
-          { key: 'playerRunA' },
-          { key: 'playerRunB' },
-        ],
-        frameRate: 6,
-        repeat: -1,
-      })
-    }
+    this.createPlayerAnimations()
+    this.showPlayerIdle()
 
     this.bullets = this.physics.add.group()
     this.enemyBullets = this.physics.add.group()
@@ -594,6 +591,7 @@ class MainScene extends Phaser.Scene {
     this.isPaused = false
     this.pauseStartedAt = 0
     this.continueText = undefined
+    this.playerFacing = 'down'
 
     this.lastShotTime = 0
     this.lastSpawnTime = 0
@@ -1621,24 +1619,52 @@ class MainScene extends Phaser.Scene {
   private updatePlayerAnimation() {
     const velocity = this.player.body?.velocity
     const isMoving = Boolean(velocity && (velocity.x !== 0 || velocity.y !== 0))
-    const isPlayingRun = this.player.anims.isPlaying
-      && this.player.anims.currentAnim?.key === 'playerRun'
 
-    if (isMoving) {
-      if (!isPlayingRun) this.player.play('playerRun')
-      return
+    if (isMoving && velocity) {
+      this.playerFacing = getPlayerFacing(velocity.x, velocity.y, this.playerFacing)
     }
 
-    this.showPlayerIdle()
+    this.playPlayerAnimation(isMoving ? 'run' : 'idle')
   }
 
   private showPlayerIdle() {
-    const isPlayingRun = this.player.anims.isPlaying
-      && this.player.anims.currentAnim?.key === 'playerRun'
+    this.playPlayerAnimation('idle')
+  }
 
-    if (isPlayingRun) this.player.stop()
-    if (this.player.texture.key !== 'playerIdleDown') {
-      this.player.setTexture('playerIdleDown')
+  private createPlayerAnimations() {
+    const directions = [
+      { name: 'down', column: 0 },
+      { name: 'down-right', column: 1 },
+      { name: 'right', column: 2 },
+      { name: 'up-right', column: 3 },
+      { name: 'up', column: 4 },
+    ] as const
+
+    directions.forEach(({ name, column }) => {
+      const animations = [
+        { key: `idle-${name}`, frames: [column, column + 5], frameRate: 3 },
+        { key: `run-${name}`, frames: [column + 10, column + 15], frameRate: 6 },
+      ]
+
+      animations.forEach(({ key, frames, frameRate }) => {
+        if (this.anims.exists(key)) return
+        this.anims.create({
+          key,
+          frames: frames.map((frame) => ({ key: 'playerSpriteSheet', frame })),
+          frameRate,
+          repeat: -1,
+        })
+      })
+    })
+  }
+
+  private playPlayerAnimation(action: 'idle' | 'run') {
+    const direction = getPlayerAnimationDirection(this.playerFacing)
+    const animationKey = `${action}-${direction}`
+
+    this.player.setFlipX(shouldFlipPlayer(this.playerFacing))
+    if (!this.player.anims.isPlaying || this.player.anims.currentAnim?.key !== animationKey) {
+      this.player.play(animationKey)
     }
   }
 
