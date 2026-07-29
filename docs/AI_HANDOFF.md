@@ -16,8 +16,9 @@
 - Date: 2026-07-29
 - Updated by: Codex
 - Branch: main
-- Commit: `134ee0e feat: 接入玩家跑动动画`
+- Commit: pending `feat: 整理玩家 sprite sheet 资源`
 - Related commits:
+  - `1dced0a docs: 记录玩家图集接入方案`
   - `134ee0e feat: 接入玩家跑动动画`
   - `a4b03fe feat: 添加玩家跑动帧素材`
   - `c0f0971 feat: 接入玩家角色素材`
@@ -26,6 +27,41 @@
 ---
 
 ## Current Project Snapshot
+
+### 2026-07-29 整理玩家正式 sprite sheet 资源
+
+本轮目标：将冻结的玩家角色美术展示板整理为 Phaser 后续可加载的正式 sprite sheet；本轮只准备资源并记录视觉尺寸决策，不接入动画代码。
+
+实际修改：
+
+- 新增 `src/assets/sprites/player/player-sprite-sheet.png`：240×192 RGBA PNG，单帧 48×48，共 5 列 × 4 行、20 帧。
+- 方向列依次为 Down、Down-right、Right、Up-right、Up。
+- 动作行依次为 Idle A、Idle B、Run A、Run B；frame 0–4、5–9、10–14、15–19 分别对应四行动作。
+- 从 `public/assets/raw/player/player_sprite_sheet.png` 展示板中确定性提取角色，去除标题、方向文字、棋盘背景、方向示意和调色板；未生成或重新设计角色，输出不使用抗锯齿，保留从原图像素块采样的颜色和硬透明边缘。
+- 原始展示板继续保留在 `public/assets/raw/player/player_sprite_sheet.png`，未删除或覆盖。
+- `PROJECT_CONTEXT.md` 新增 `Player Character Visual Scale`，冻结玩家 v1.0 的 48×48 正式视觉尺寸，并明确视觉尺寸与较小、居中的 Arcade Physics body 分离。
+
+范围确认：
+
+- 尚未在 Phaser 中加载或播放新 sprite sheet。
+- 未修改 `src/main.ts`、移动、射击、敌人、关卡、碰撞数值或资源加载结构。
+- 旧的三个 32×32 玩家实验帧继续保留，未删除。
+
+验证：
+
+- 正式资源已核对为 240×192、RGBA、20 个 48×48 帧。
+- alpha 仅包含全透明和全不透明像素，没有半透明或抗锯齿边缘。
+- 输出中的全部不透明 RGB 颜色均可在原始展示板中找到，没有通过插值生成新颜色。
+- 逐帧放大检查了角色轮廓、方向顺序、跑动帧边界和棋盘背景残留。
+- `npm run build` 通过；仅有既有 Vite 大 chunk 警告。
+- `git diff --check` 通过；最终 diff 和 Git 状态已审查。
+
+当前风险与下一步：
+
+- 展示板本身是无 alpha 的 RGB 合成图，本轮通过棋盘背景识别和整数像素块采样恢复正式透明资源；后续接入前仍建议由用户在像素编辑器中做一次最终视觉复核。
+- 下一轮可单独接入 Phaser `load.spritesheet()` 和方向动画；必须继续保持现有碰撞数值和玩法逻辑稳定。
+
+提交状态：待使用 `feat: 整理玩家 sprite sheet 资源` 提交；未 push。
 
 ### 2026-07-29 玩家 sprite sheet 接入前审查
 

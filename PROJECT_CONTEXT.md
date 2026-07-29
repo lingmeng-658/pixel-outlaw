@@ -15,6 +15,21 @@ Pixel Outlaw 是一个基于 Vite + TypeScript + Phaser 的西部像素风俯视
 - 正式检查：npm run build
 - 线上部署：GitHub Pages + GitHub Actions
 
+## Player Character Visual Scale
+
+Player sprite v1.0 uses 48×48 pixel frames.
+
+The sprite visual size is independent from the Arcade physics body.
+
+The initial collision body remains smaller and centered to preserve gameplay stability.
+
+Player assets should not be downscaled to 32×32 unless future gameplay readability testing requires it.
+
+- 玩家角色 v1.0 正式视觉尺寸确定为 48×48。
+- 角色视觉尺寸与 Arcade Physics 碰撞体相互独立。
+- 当前碰撞逻辑不因本次视觉资源升级而改变，初始碰撞体继续保持较小并居中。
+- 后续不再为了兼容旧 32×32 素材而强制缩小玩家角色；只有未来玩法可读性测试明确需要时才重新评估。
+
 ## 线上试玩
 
 当前线上试玩地址：
