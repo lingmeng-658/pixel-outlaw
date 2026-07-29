@@ -16,8 +16,9 @@
 - Date: 2026-07-29
 - Updated by: Codex
 - Branch: main
-- Commit: `feat: 接入玩家 sprite sheet 动画`
+- Commit: `fix: 修复玩家左右方向镜像错误`
 - Related commits:
+  - `f5fd480 feat: 接入玩家 sprite sheet 动画`
   - `0773093 docs: 更新玩家 sprite sheet 接入任务`
   - `08d758e feat: 整理玩家 sprite sheet 资源`
   - `1dced0a docs: 记录玩家图集接入方案`
@@ -29,6 +30,33 @@
 ---
 
 ## Current Project Snapshot
+
+### 2026-07-29 修复玩家左右方向镜像错误
+
+本轮目标：修复正式 48×48 sprite sheet 接入后玩家左右及左右斜向显示相反的问题，不修改素材、速度、碰撞、射击或 Player 结构。
+
+问题原因：
+
+- `getPlayerFacing()` 的速度到八方向映射正确，left / down-left / up-left 复用 right / down-right / up-right 动画的逻辑也正确。
+- 实际检查正式图集后确认，名为 Right、Down-right、Up-right 的三列像素基准姿态实际朝左。
+- 原代码假设这三列原生朝右，因此 right 系列不翻转、left 系列反而 `flipX`，导致水平和斜向镜像全部反向。
+
+最小修复：
+
+- `src/playerDirection.ts`：仅调整 `shouldFlipPlayer()`，现在 right、down-right、up-right 使用 `flipX`；left、down-left、up-left 直接使用原帧。
+- `src/playerDirection.test.mjs`：更新镜像回归测试，明确覆盖三种右向需翻转、三种左向及 up/down 不翻转。
+- 未修改 `src/main.ts`、sprite sheet 或任何玩法数值。
+
+验证：
+
+- TDD RED：更新后的镜像回归测试在旧实现上按预期失败，right 得到 `false` 而测试要求 `true`。
+- TDD GREEN：最小修改后方向测试 4/4 通过。
+- `npm run build` 通过，仅有既有 Vite 大 chunk 警告。
+- `git diff --check` 通过；最终 diff、stat 与 status 已复核。
+
+当前风险与用户确认点：代码层映射已覆盖八方向，但仍需运行 `npm run dev`，实际确认 A/D、左上/左下、右上/右下的画面朝向和停止后的最后朝向。
+
+提交状态：已提交为 `fix: 修复玩家左右方向镜像错误`；未 push。
 
 ### 2026-07-29 接入玩家 sprite sheet 动画
 
@@ -59,7 +87,7 @@
 
 范围确认：未修改移动速度、射击系统、碰撞数值、敌人、关卡、存档、输入或玩法逻辑；旧三个 32×32 实验帧仍保留，未在本轮删除。
 
-提交状态：已提交为 `feat: 接入玩家 sprite sheet 动画`；待 push。
+提交状态：已提交并 push 为 `f5fd480 feat: 接入玩家 sprite sheet 动画`。
 
 ### 2026-07-29 整理玩家正式 sprite sheet 资源
 

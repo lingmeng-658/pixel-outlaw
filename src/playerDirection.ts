@@ -40,5 +40,5 @@ export function getPlayerAnimationDirection(
 }
 
 export function shouldFlipPlayer(facing: PlayerFacing) {
-  return facing === 'left' || facing === 'down-left' || facing === 'up-left'
+  return facing === 'right' || facing === 'down-right' || facing === 'up-right'
 }

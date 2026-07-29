@@ -35,10 +35,13 @@ test('maps left facings onto reusable right-side animation directions', () => {
   assert.equal(getPlayerAnimationDirection('up'), 'up')
 })
 
-test('flips only left-side facings', () => {
-  assert.equal(shouldFlipPlayer('left'), true)
-  assert.equal(shouldFlipPlayer('down-left'), true)
-  assert.equal(shouldFlipPlayer('up-left'), true)
-  assert.equal(shouldFlipPlayer('right'), false)
+test('flips right-side facings because the reusable sprite frames face left', () => {
+  assert.equal(shouldFlipPlayer('right'), true)
+  assert.equal(shouldFlipPlayer('down-right'), true)
+  assert.equal(shouldFlipPlayer('up-right'), true)
+  assert.equal(shouldFlipPlayer('left'), false)
+  assert.equal(shouldFlipPlayer('down-left'), false)
+  assert.equal(shouldFlipPlayer('up-left'), false)
   assert.equal(shouldFlipPlayer('down'), false)
+  assert.equal(shouldFlipPlayer('up'), false)
 })
